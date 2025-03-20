@@ -159,15 +159,15 @@ class BotApp:
         # Обработчик всех сообщений
         self.dp.message.register(self.message_handlers.handle_message)
 
-    async def start(self):
-        """Запуск бота"""
-        self.setup_handlers()
-        await self.on_startup()
-        try:
-            await self.dp.start_polling(self.bot, allowed_updates=["message"])
-        except Exception as e:
-            logger.error(f"Ошибка при запуске бота: {e}")
-            if MONITORING_ENABLED:
-                monitoring.log_error(e, {"context": "bot_polling"})
-        finally:
-            await self.on_shutdown()
+async def start(self):
+    """Запуск бота"""
+    await self.on_startup()  # Сначала инициализируем все компоненты
+    self.setup_handlers()    # Затем регистрируем обработчики
+    try:
+        await self.dp.start_polling(self.bot, allowed_updates=["message"])
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
+        if MONITORING_ENABLED:
+            monitoring.log_error(e, {"context": "bot_polling"})
+    finally:
+        await self.on_shutdown()
