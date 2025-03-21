@@ -35,8 +35,8 @@ OPENWEATHER_API_KEY = get_env_var('OPENWEATHER_API_KEY')
 RAPIDAPI_KEY = get_env_var('RAPIDAPI_KEY')
 CHAT_ID = int(get_env_var('CHAT_ID'))
 DATABASE_URL = get_env_var('DATABASE_URL')
-TARGET_USER_ID = int(get_env_var('TARGET_USER_ID', '948182089'))
-TARGET_CHAT_ID = int(get_env_var('TARGET_CHAT_ID', '-1002520045054'))  # Чат, в котором сохраняем всю историю
+TARGET_USER_ID = int(get_env_var('TARGET_USER_ID', '660949286'))
+TARGET_CHAT_ID = int(get_env_var('TARGET_CHAT_ID', '-1002362736664'))  # Чат, в котором сохраняем всю историю
 ADMIN_CHAT_ID = int(get_env_var('ADMIN_CHAT_ID', str(TARGET_USER_ID)))  # По умолчанию TARGET_USER_ID
 
 # AI настройки
