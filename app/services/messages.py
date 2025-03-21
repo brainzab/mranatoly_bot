@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from aiogram import Bot
 from app.services.api import ApiClient
-from app.config import CHAT_ID
+from app.config import CHAT_ID, TARGET_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,9 @@ class MorningMessageSender:
             }
             
             # Параллельно выполняем все запросы к API
-            weather_tasks = [ApiClient.get_weather(code) for code in cities.values()]
-            currency_task = ApiClient.get_currency_rates()
-            crypto_task = ApiClient.get_crypto_prices()
+            weather_tasks = [ApiClient.get_weather(code, TARGET_CHAT_ID) for code in cities.values()]
+            currency_task = ApiClient.get_currency_rates(TARGET_CHAT_ID)
+            crypto_task = ApiClient.get_crypto_prices(TARGET_CHAT_ID)
             
             # Собираем результаты
             results = await asyncio.gather(
