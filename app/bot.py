@@ -141,6 +141,10 @@ class BotApp:
         self.dp.message.register(self.command_handlers.command_reset, Command("reset"))
         self.dp.message.register(self.command_handlers.command_stats, Command("stats"))
         self.dp.message.register(self.command_handlers.command_test, Command("test"))
+        self.dp.message.register(self.command_handlers.command_pogoda, Command("pogoda"))
+        self.dp.message.register(self.command_handlers.command_wld, Command("wld"))
+        self.dp.message.register(self.command_handlers.command_rub, Command("rub"))
+        self.dp.message.register(self.command_handlers.command_byn, Command("byn"))
         
         # Команды для футбольных матчей
         self.dp.message.register(
