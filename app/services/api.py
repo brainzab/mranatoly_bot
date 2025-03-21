@@ -38,11 +38,15 @@ class ApiGateway:
         self.error_count = 0
         
     async def request(self, method, url, headers=None, params=None, data=None, 
-                     cache_key=None, cache_ttl=300):
+                     cache_key=None, cache_ttl=300, chat_id=None):
         """
         Выполняет HTTP-запрос с поддержкой кэширования и повторных попыток
         """
         self.request_count += 1
+        
+        # Увеличиваем глобальный счетчик API-запросов
+        from app.services.monitoring import monitoring
+        monitoring.increment_api_request(chat_id)
         
         # Проверяем кэш если нужно
         if cache_key and cache_key in self.cache:
@@ -88,7 +92,7 @@ api_gateway = ApiGateway()
 
 class ApiClient:
     @staticmethod
-    async def get_weather(city):
+    async def get_weather(city, chat_id=None):
         cache_key = f"weather_{city}"
         url = f"http://api.openweathermap.org/data/2.5/weather"
         params = {
@@ -104,7 +108,8 @@ class ApiClient:
                 url=url, 
                 params=params,
                 cache_key=cache_key,
-                cache_ttl=1800  # 30 минут
+                cache_ttl=1800,  # 30 минут
+                chat_id=chat_id
             )
             temp = data['main']['temp']
             desc = data['weather'][0]['description']
@@ -114,7 +119,7 @@ class ApiClient:
             return "Нет данных"
 
     @staticmethod
-    async def get_currency_rates():
+    async def get_currency_rates(chat_id=None):
         url = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
         cache_key = "currency_rates"
         
@@ -123,7 +128,8 @@ class ApiClient:
                 method="GET", 
                 url=url,
                 cache_key=cache_key,
-                cache_ttl=3600  # 1 час
+                cache_ttl=3600,  # 1 час
+                chat_id=chat_id
             )
             usd_byn = data['usd'].get('byn', 0)
             usd_rub = data['usd'].get('rub', 0)
@@ -133,7 +139,7 @@ class ApiClient:
             return 0, 0
 
     @staticmethod
-    async def get_crypto_prices():
+    async def get_crypto_prices(chat_id=None):
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,worldcoin&vs_currencies=usd"
         cache_key = "crypto_prices"
         
@@ -142,7 +148,8 @@ class ApiClient:
                 method="GET", 
                 url=url,
                 cache_key=cache_key,
-                cache_ttl=3600  # 1 час
+                cache_ttl=3600,  # 1 час
+                chat_id=chat_id
             )
             btc_price = data.get('bitcoin', {}).get('usd', 0)
             wld_price = data.get('worldcoin', {}).get('usd', 0)
@@ -152,7 +159,7 @@ class ApiClient:
             return 0, 0
 
     @staticmethod
-    async def get_team_matches(team_id):
+    async def get_team_matches(team_id, chat_id=None):
         url = f"https://api-football-v1.p.rapidapi.com/v3/fixtures"
         headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         params = {"team": team_id, "last": "5"}
@@ -165,14 +172,15 @@ class ApiClient:
                 headers=headers,
                 params=params,
                 cache_key=cache_key,
-                cache_ttl=7200  # 2 часа
+                cache_ttl=7200,  # 2 часа
+                chat_id=chat_id
             )
         except Exception as e:
             logger.error(f"Ошибка API-Football для команды {team_id}: {e}")
             return None
 
     @staticmethod
-    async def get_match_events(fixture_id):
+    async def get_match_events(fixture_id, chat_id=None):
         url = f"https://api-football-v1.p.rapidapi.com/v3/fixtures/events"
         headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         params = {"fixture": fixture_id}
@@ -185,7 +193,8 @@ class ApiClient:
                 headers=headers,
                 params=params,
                 cache_key=cache_key,
-                cache_ttl=3600  # 1 час
+                cache_ttl=3600,  # 1 час
+                chat_id=chat_id
             )
             logger.info(f"События для матча {fixture_id}: получено")
             return data
