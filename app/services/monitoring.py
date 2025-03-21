@@ -6,6 +6,7 @@ import os
 import psutil
 from functools import wraps
 from datetime import datetime
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,15 @@ class BotMonitoring:
         self.api_request_count = 0
         self.ai_request_count = 0
         self.db_operation_count = 0
+        
+        # Статистика по чатам
+        self.chat_stats = defaultdict(lambda: {
+            'message_count': 0,
+            'command_count': 0,
+            'api_request_count': 0,
+            'ai_request_count': 0,
+            'db_operation_count': 0
+        })
         
     def set_bot(self, bot):
         """Устанавливает бота для отправки уведомлений"""
@@ -50,38 +60,48 @@ class BotMonitoring:
         
         # Храним в списке последних ошибок
         self.last_errors.append({
-            "time": time.time(),
-            "error": str(error),
-            "traceback": error_trace
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'error': str(error),
+            'trace': error_trace,
+            'context': context
         })
-        # Ограничиваем список последних ошибок
+        
+        # Ограничиваем размер списка ошибок
         if len(self.last_errors) > 10:
-            self.last_errors.pop(0)
+            self.last_errors = self.last_errors[-10:]
         
-        # Уведомляем админа асинхронно
+        # Асинхронно уведомляем админа
         if self.bot and self.admin_chat_id:
-            # Ограничиваем длину сообщения для Telegram
-            short_msg = error_msg[:3900] + "..." if len(error_msg) > 4000 else error_msg
-            asyncio.create_task(self.notify_admin(short_msg))
-        
+            asyncio.create_task(self.notify_admin(error_msg[:4000]))  # Ограничиваем размер сообщения
+    
     def log_memory_usage(self):
-        """Логирует текущее использование памяти процессом"""
+        """Логирует использование памяти процессом"""
         process = psutil.Process(os.getpid())
-        memory_info = process.memory_info()
-        logger.info(f"Использование памяти: {memory_info.rss / 1024 / 1024:.2f} МБ")
-        return memory_info.rss / 1024 / 1024  # МБ
-            
+        mem_info = process.memory_info()
+        logger.info(f"Использование памяти: {mem_info.rss / 1024 / 1024:.2f} МБ")
+    
     def get_stats(self):
         """Возвращает статистику работы бота"""
         uptime_seconds = time.time() - self.start_time
-        hours, remainder = divmod(uptime_seconds, 3600)
+        days, remainder = divmod(uptime_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
         minutes, seconds = divmod(remainder, 60)
         
-        memory_usage = self.log_memory_usage()
+        uptime_str = ""
+        if days > 0:
+            uptime_str += f"{int(days)}д "
+        if hours > 0 or days > 0:
+            uptime_str += f"{int(hours)}ч "
+        if minutes > 0 or hours > 0 or days > 0:
+            uptime_str += f"{int(minutes)}м "
+        uptime_str += f"{int(seconds)}с"
+        
+        process = psutil.Process(os.getpid())
+        mem_info = process.memory_info()
         
         return {
-            "uptime": f"{int(hours)}ч {int(minutes)}м {int(seconds)}с",
-            "memory_mb": f"{memory_usage:.2f}",
+            "uptime": uptime_str,
+            "memory_mb": f"{mem_info.rss / 1024 / 1024:.2f}",
             "message_count": self.message_count,
             "command_count": self.command_count,
             "api_request_count": self.api_request_count,
@@ -90,26 +110,51 @@ class BotMonitoring:
             "error_count": self.error_count,
             "last_errors": self.last_errors
         }
+    
+    def get_all_chats_stats(self):
+        """Возвращает статистику по всем чатам"""
+        total_stats = {
+            "total_chats": len(self.chat_stats),
+            "chats": {},
+            "total_ai_requests": sum(stats['ai_request_count'] for stats in self.chat_stats.values()),
+            "total_api_requests": sum(stats['api_request_count'] for stats in self.chat_stats.values())
+        }
         
-    def increment_message(self):
+        # Добавляем статистику по каждому чату
+        for chat_id, stats in self.chat_stats.items():
+            total_stats["chats"][chat_id] = stats.copy()
+        
+        return total_stats
+        
+    def increment_message(self, chat_id=None):
         """Увеличивает счетчик обработанных сообщений"""
         self.message_count += 1
+        if chat_id:
+            self.chat_stats[chat_id]['message_count'] += 1
         
-    def increment_command(self):
+    def increment_command(self, chat_id=None):
         """Увеличивает счетчик выполненных команд"""
         self.command_count += 1
+        if chat_id:
+            self.chat_stats[chat_id]['command_count'] += 1
         
-    def increment_api_request(self):
+    def increment_api_request(self, chat_id=None):
         """Увеличивает счетчик API-запросов"""
         self.api_request_count += 1
+        if chat_id:
+            self.chat_stats[chat_id]['api_request_count'] += 1
         
-    def increment_ai_request(self):
+    def increment_ai_request(self, chat_id=None):
         """Увеличивает счетчик запросов к AI"""
         self.ai_request_count += 1
+        if chat_id:
+            self.chat_stats[chat_id]['ai_request_count'] += 1
         
-    def increment_db_operation(self):
+    def increment_db_operation(self, chat_id=None):
         """Увеличивает счетчик операций с базой данных"""
         self.db_operation_count += 1
+        if chat_id:
+            self.chat_stats[chat_id]['db_operation_count'] += 1
 
 # Создаем глобальный экземпляр мониторинга
 monitoring = BotMonitoring()
