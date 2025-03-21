@@ -162,36 +162,25 @@ class BotApp:
     def setup_handlers(self):
         """Регистрация обработчиков сообщений и команд"""
         # Команды
-        self.dp.message.register(self.command_handlers.command_start, 
-                                Command(commands=["start"]))
-        self.dp.message.register(self.command_handlers.command_help, 
-                                Command(commands=["help"]))
-        self.dp.message.register(self.command_handlers.command_version, 
-                                Command(commands=["version"]))
-        self.dp.message.register(self.command_handlers.command_pogoda, 
-                                Command(commands=["pogoda"]))
-        self.dp.message.register(self.command_handlers.command_wld, 
-                                Command(commands=["wld"]))
-        self.dp.message.register(self.command_handlers.command_stats, 
-                                Command(commands=["stats"]))
-        self.dp.message.register(self.command_handlers.command_chatstats, 
-                                Command(commands=["chatstats"]))
-        self.dp.message.register(self.command_handlers.command_byn, 
-                                Command(commands=["byn"]))
-        self.dp.message.register(self.command_handlers.command_rub, 
-                                Command(commands=["rub"]))
-        self.dp.message.register(self.command_handlers.command_test, 
-                                Command(commands=["test"]))
-        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="real"), 
-                                Command(commands=["real"]))
-        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="lfc"), 
-                                Command(commands=["lfc"]))
-        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="arsenal"), 
-                                Command(commands=["arsenal"]))
+        self.dp.message.register(self.command_handlers.command_start, Command("start"))
+        self.dp.message.register(self.command_handlers.command_version, Command("version"))
+        self.dp.message.register(self.command_handlers.command_reset, Command("reset"))
+        self.dp.message.register(self.command_handlers.command_stats, Command("stats"))
+        self.dp.message.register(self.command_handlers.command_test, Command("test"))
         
-        # Регистрация команды экспорта чатов (только для администратора)
-        self.dp.message.register(self.command_handlers.command_export_chats, 
-                                Command(commands=["exportchats"]))
+        # Команды для футбольных матчей
+        self.dp.message.register(
+            partial(self.command_handlers.command_team_matches, team_name="real"), 
+            Command("real")
+        )
+        self.dp.message.register(
+            partial(self.command_handlers.command_team_matches, team_name="lfc"), 
+            Command("lfc")
+        )
+        self.dp.message.register(
+            partial(self.command_handlers.command_team_matches, team_name="arsenal"), 
+            Command("arsenal")
+        )
         
         # Обработчик всех сообщений
         self.dp.message.register(self.message_handlers.handle_message)
