@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 # Настройка логирования
 logging.basicConfig(
@@ -54,3 +55,53 @@ TARGET_REACTION = get_env_var('TARGET_REACTION')              # Обязател
 BACKUP_ENABLED = get_env_var('BACKUP_ENABLED', 'true').lower() == 'true'
 BACKUP_PATH = get_env_var('BACKUP_PATH', './backups')
 MONITORING_ENABLED = get_env_var('MONITORING_ENABLED', 'true').lower() == 'true'
+
+# Google Drive API настройки
+DRIVE_ENABLED = bool(os.environ.get('DRIVE_ENABLED', 'False') == 'True')
+GDRIVE_CREDENTIALS_FILE = os.environ.get('GDRIVE_CREDENTIALS_FILE', 'credentials.json')
+GDRIVE_FOLDER_ID = os.environ.get('GDRIVE_FOLDER_ID', '')  # ID папки на Google Drive для сохранения файлов
+CHAT_EXPORT_INTERVAL_HOURS = int(os.environ.get('CHAT_EXPORT_INTERVAL_HOURS', '24'))  # Интервал экспорта в часах
+
+class Config:
+    """Класс конфигурации бота"""
+    
+    @staticmethod
+    def get_logging_config() -> Dict[str, Any]:
+        """Получить конфигурацию логирования"""
+        return {
+            "level": getattr(logging, get_env_var('LOG_LEVEL', 'INFO')),
+            "format": get_env_var('LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
+        }
+    
+    @staticmethod
+    def get_database_config() -> Dict[str, Any]:
+        """Получить конфигурацию базы данных"""
+        return {
+            "url": DATABASE_URL,
+            "pool_size": int(get_env_var('DATABASE_POOL_SIZE', '10')),
+        }
+    
+    @staticmethod
+    def get_api_config() -> Dict[str, Any]:
+        """Получить конфигурацию API"""
+        return {
+            "timeout": int(get_env_var('API_TIMEOUT', '10')),
+            "openai_key": get_env_var('OPENAI_API_KEY', ''),
+            "weather_key": get_env_var('WEATHER_API_KEY', ''),
+            "rapidapi_key": RAPIDAPI_KEY,
+        }
+    
+    @staticmethod
+    def get_team_ids() -> Dict[str, int]:
+        """Получить ID футбольных команд"""
+        return TEAM_IDS
+    
+    @staticmethod
+    def get_drive_config() -> Dict[str, Any]:
+        """Получить конфигурацию Google Drive"""
+        return {
+            "enabled": DRIVE_ENABLED,
+            "credentials_file": GDRIVE_CREDENTIALS_FILE,
+            "folder_id": GDRIVE_FOLDER_ID,
+            "export_interval_hours": CHAT_EXPORT_INTERVAL_HOURS,
+        }

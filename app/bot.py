@@ -10,7 +10,8 @@ from functools import partial
 
 from app.config import (
     TELEGRAM_TOKEN, DATABASE_URL, CODE_VERSION,
-    CHAT_ID, ADMIN_CHAT_ID, BACKUP_ENABLED, MONITORING_ENABLED
+    CHAT_ID, ADMIN_CHAT_ID, BACKUP_ENABLED, MONITORING_ENABLED,
+    DRIVE_ENABLED, CHAT_EXPORT_INTERVAL_HOURS
 )
 from app.services.messages import MorningMessageSender
 from app.services.monitoring import monitoring
@@ -65,7 +66,7 @@ class BotApp:
         # Утренние сообщения
         self.scheduler.add_job(
             self.morning_sender.send_morning_message, 
-            trigger=CronTrigger(hour=8, minute=0)
+            trigger=CronTrigger(hour=7, minute=30)
         )
         
         # Очистка старых сообщений
@@ -84,11 +85,36 @@ class BotApp:
         # Резервное копирование БД
         if BACKUP_ENABLED:
             self.scheduler.add_job(
-                backup_database, 
-                args=[DATABASE_URL],
-                trigger=CronTrigger(day_of_week='mon-sun', hour=3, minute=0)  # Каждый день в 3:00
+                lambda: backup_database(DATABASE_URL),
+                trigger=CronTrigger(hour=3, minute=0)
+            )
+        
+        # Настройка экспорта истории чатов в Google Drive
+        if DRIVE_ENABLED:
+            from app.services.export import ChatExportService
+            
+            async def export_chats_history():
+                """Функция для экспорта истории чатов с обработкой ошибок"""
+                try:
+                    export_service = ChatExportService(self.db_pool, ADMIN_CHAT_ID, self.bot)
+                    await export_service.export_all_chats_history()
+                except Exception as e:
+                    logger.error(f"Ошибка при запланированном экспорте истории чатов: {e}")
+            
+            # Экспорт чатов по расписанию (по умолчанию - раз в сутки)
+            self.scheduler.add_job(
+                export_chats_history,
+                trigger=CronTrigger(hour=4, minute=0)  # Запускаем в 4 утра
             )
             
+            # Также запускаем экспорт с интервалом, указанным в конфигурации
+            if CHAT_EXPORT_INTERVAL_HOURS > 0 and CHAT_EXPORT_INTERVAL_HOURS != 24:
+                self.scheduler.add_job(
+                    export_chats_history,
+                    'interval', 
+                    hours=CHAT_EXPORT_INTERVAL_HOURS
+                )
+        
         # Логирование использования памяти
         self.scheduler.add_job(
             monitoring.log_memory_usage,
@@ -136,38 +162,49 @@ class BotApp:
     def setup_handlers(self):
         """Регистрация обработчиков сообщений и команд"""
         # Команды
-        self.dp.message.register(self.command_handlers.command_start, Command("start"))
-        self.dp.message.register(self.command_handlers.command_version, Command("version"))
-        self.dp.message.register(self.command_handlers.command_reset, Command("reset"))
-        self.dp.message.register(self.command_handlers.command_stats, Command("stats"))
-        self.dp.message.register(self.command_handlers.command_test, Command("test"))
+        self.dp.message.register(self.command_handlers.command_start, 
+                                Command(commands=["start"]))
+        self.dp.message.register(self.command_handlers.command_help, 
+                                Command(commands=["help"]))
+        self.dp.message.register(self.command_handlers.command_version, 
+                                Command(commands=["version"]))
+        self.dp.message.register(self.command_handlers.command_pogoda, 
+                                Command(commands=["pogoda"]))
+        self.dp.message.register(self.command_handlers.command_wld, 
+                                Command(commands=["wld"]))
+        self.dp.message.register(self.command_handlers.command_stats, 
+                                Command(commands=["stats"]))
+        self.dp.message.register(self.command_handlers.command_chatstats, 
+                                Command(commands=["chatstats"]))
+        self.dp.message.register(self.command_handlers.command_byn, 
+                                Command(commands=["byn"]))
+        self.dp.message.register(self.command_handlers.command_rub, 
+                                Command(commands=["rub"]))
+        self.dp.message.register(self.command_handlers.command_test, 
+                                Command(commands=["test"]))
+        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="real"), 
+                                Command(commands=["real"]))
+        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="lfc"), 
+                                Command(commands=["lfc"]))
+        self.dp.message.register(partial(self.command_handlers.command_team_matches, team_name="arsenal"), 
+                                Command(commands=["arsenal"]))
         
-        # Команды для футбольных матчей
-        self.dp.message.register(
-            partial(self.command_handlers.command_team_matches, team_name="real"), 
-            Command("real")
-        )
-        self.dp.message.register(
-            partial(self.command_handlers.command_team_matches, team_name="lfc"), 
-            Command("lfc")
-        )
-        self.dp.message.register(
-            partial(self.command_handlers.command_team_matches, team_name="arsenal"), 
-            Command("arsenal")
-        )
+        # Регистрация команды экспорта чатов (только для администратора)
+        self.dp.message.register(self.command_handlers.command_export_chats, 
+                                Command(commands=["exportchats"]))
         
         # Обработчик всех сообщений
         self.dp.message.register(self.message_handlers.handle_message)
 
-async def start(self):
-    """Запуск бота"""
-    await self.on_startup()  # Сначала инициализируем все компоненты
-    self.setup_handlers()    # Затем регистрируем обработчики
-    try:
-        await self.dp.start_polling(self.bot, allowed_updates=["message"])
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
-        if MONITORING_ENABLED:
-            monitoring.log_error(e, {"context": "bot_polling"})
-    finally:
-        await self.on_shutdown()
+    async def start(self):
+        """Запуск бота"""
+        await self.on_startup()  # Сначала инициализируем все компоненты
+        self.setup_handlers()    # Затем регистрируем обработчики
+        try:
+            await self.dp.start_polling(self.bot, allowed_updates=["message"])
+        except Exception as e:
+            logger.error(f"Ошибка при запуске бота: {e}")
+            if MONITORING_ENABLED:
+                monitoring.log_error(e, {"context": "bot_polling"})
+        finally:
+            await self.on_shutdown()

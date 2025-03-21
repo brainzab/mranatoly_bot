@@ -155,3 +155,100 @@ class ChatHistory:
         except asyncpg.PostgresError as e:
             logger.error(f"Ошибка PostgreSQL при очистке старых сообщений: {e}")
             return False
+    
+    @staticmethod
+    async def get_chat_messages_stats(pool, chat_id, period=None):
+        """
+        Получает статистику сообщений в чате за указанный период
+        
+        :param pool: Пул соединений с БД
+        :param chat_id: ID чата
+        :param period: Период (day, month, year, all). По умолчанию - all
+        :return: Словарь со статистикой
+        """
+        try:
+            monitoring.increment_db_operation()
+            
+            # Определяем timestamp начала периода
+            timestamp_condition = ""
+            if period == "day":
+                # Сообщения за последние 24 часа
+                timestamp_condition = "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day')"
+            elif period == "month":
+                # Сообщения за последние 30 дней
+                timestamp_condition = "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 days')"
+            elif period == "year":
+                # Сообщения за последние 365 дней
+                timestamp_condition = "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '365 days')"
+            
+            async with pool.acquire() as conn:
+                # Получаем общее количество сообщений за период
+                query = f"""
+                SELECT COUNT(*) 
+                FROM chat_history 
+                WHERE chat_id = $1 AND role = 'user' {timestamp_condition}
+                """
+                total_messages = await conn.fetchval(query, chat_id)
+                
+                # Получаем статистику по пользователям
+                query = f"""
+                SELECT user_id, COUNT(*) as message_count
+                FROM chat_history
+                WHERE chat_id = $1 AND role = 'user' {timestamp_condition}
+                GROUP BY user_id
+                ORDER BY message_count DESC
+                """
+                rows = await conn.fetch(query, chat_id)
+                
+                # Формируем результат
+                users_stats = []
+                for row in rows:
+                    users_stats.append({
+                        "user_id": row["user_id"],
+                        "message_count": row["message_count"]
+                    })
+                
+                return {
+                    "total_messages": total_messages,
+                    "users": users_stats
+                }
+                
+        except asyncpg.PostgresError as e:
+            logger.error(f"Ошибка PostgreSQL при получении статистики сообщений: {e}")
+            return {"total_messages": 0, "users": []}
+        except Exception as e:
+            logger.error(f"Ошибка при получении статистики сообщений: {e}")
+            return {"total_messages": 0, "users": []}
+
+    @staticmethod
+    async def get_usernames_by_ids(pool, bot, user_ids):
+        """
+        Получает имена пользователей по их ID
+        
+        :param pool: Пул соединений с БД
+        :param bot: Экземпляр бота для получения информации о пользователях
+        :param user_ids: Список ID пользователей
+        :return: Словарь {user_id: username}
+        """
+        result = {}
+        try:
+            for user_id in user_ids:
+                try:
+                    # Пытаемся получить информацию о пользователе через API Telegram
+                    chat_member = await bot.get_chat_member(chat_id=user_id, user_id=user_id)
+                    user = chat_member.user
+                    
+                    # Формируем имя пользователя
+                    if user.username:
+                        name = f"@{user.username}"
+                    else:
+                        name = user.full_name or f"User {user_id}"
+                    
+                    result[user_id] = name
+                except Exception as e:
+                    logger.warning(f"Не удалось получить имя пользователя {user_id}: {e}")
+                    result[user_id] = f"User {user_id}"
+        except Exception as e:
+            logger.error(f"Ошибка при получении имен пользователей: {e}")
+        
+        return result

@@ -1,6 +1,7 @@
 import logging
 from openai import AsyncOpenAI
 from app.config import DEEPSEEK_API_KEY, AI_SYSTEM_PROMPT, MAX_TOKENS, AI_TEMPERATURE
+from app.services.api import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -19,23 +20,26 @@ class AiHandler:
             
             logger.info(f"Отправка запроса к AI: {query[:50]}...")
             
-            # Можно добавить повторные попытки здесь, если API нестабильно
-            for attempt in range(3):
-                try:
-                    response = await deepseek_client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=messages,
-                        max_tokens=MAX_TOKENS,
-                        temperature=AI_TEMPERATURE
-                    )
-                    return response.choices[0].message.content
-                except Exception as e:
-                    logger.warning(f"Попытка {attempt+1}/3 запроса к AI не удалась: {e}")
-                    if attempt == 2:  # последняя попытка
-                        raise
+            # Используем retry_async вместо собственной реализации повторных попыток
+            response = await retry_async(
+                AiHandler._request_ai_completion, 
+                messages=messages, 
+                max_retries=3, 
+                retry_delay=1
+            )
             
-            # Этот код не должен выполняться, но для полноты:
-            return "Ошибка получения ответа от AI"
+            return response
         except Exception as e:
             logger.error(f"Ошибка при получении ответа от AI: {e}")
             return f"Ошибка, ёбана: {str(e)}"
+
+    @staticmethod
+    async def _request_ai_completion(messages):
+        """Выполняет запрос к AI API"""
+        response = await deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            max_tokens=MAX_TOKENS,
+            temperature=AI_TEMPERATURE
+        )
+        return response.choices[0].message.content
