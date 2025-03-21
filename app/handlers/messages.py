@@ -33,7 +33,7 @@ class MessageHandlers:
             await self.init_bot_info()
             
             # Увеличиваем счетчик сообщений
-            monitoring.increment_message()
+            monitoring.increment_message(message.chat.id)
             
             # Логируем входящее сообщение
             chat_id = message.chat.id
@@ -135,7 +135,7 @@ class MessageHandlers:
             chat_history.append({"role": "assistant", "content": message.reply_to_message.text})
         
         # Увеличиваем счетчик AI-запросов
-        monitoring.increment_ai_request()
+        monitoring.increment_ai_request(message.chat.id)
         
         # Отправляем запрос к AI
         ai_response = await AiHandler.get_ai_response(chat_history, query)
