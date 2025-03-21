@@ -65,7 +65,7 @@ class BotApp:
         # Утренние сообщения
         self.scheduler.add_job(
             self.morning_sender.send_morning_message, 
-            trigger=CronTrigger(hour=8, minute=0)
+            trigger=CronTrigger(hour=7, minute=30)
         )
         
         # Очистка старых сообщений
@@ -145,6 +145,7 @@ class BotApp:
         self.dp.message.register(self.command_handlers.command_wld, Command("wld"))
         self.dp.message.register(self.command_handlers.command_rub, Command("rub"))
         self.dp.message.register(self.command_handlers.command_byn, Command("byn"))
+        self.dp.message.register(self.command_handlers.command_chatstats, Command("chatstats"))
         
         # Команды для футбольных матчей
         self.dp.message.register(
