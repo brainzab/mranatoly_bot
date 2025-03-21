@@ -19,3 +19,5 @@ async def test_get_crypto_prices():
     btc_price, wld_price = await ApiClient.get_crypto_prices()
     assert isinstance(btc_price, (float, int))
     assert isinstance(wld_price, (float, int))
+    assert btc_price > 0, "Цена BTC должна быть положительной"
+    assert wld_price > 0, "Цена WLD должна быть положительной"
