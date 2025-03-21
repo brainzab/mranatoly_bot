@@ -18,7 +18,7 @@ class CommandHandlers:
     @monitor_function
     async def command_start(self, message: types.Message, **kwargs):
         """Обработчик команды /start"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
         sent_message = await message.reply(f"Привет, я бот версии {CODE_VERSION}")
         if message.chat.id == TARGET_CHAT_ID:
             await ChatHistory.save_message(
@@ -33,7 +33,7 @@ class CommandHandlers:
     @monitor_function
     async def command_version(self, message: types.Message, **kwargs):
         """Обработчик команды /version"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
         sent_message = await message.reply(f"Версия бота: {CODE_VERSION}")
         if message.chat.id == TARGET_CHAT_ID:
             await ChatHistory.save_message(
@@ -48,7 +48,7 @@ class CommandHandlers:
     @monitor_function
     async def command_reset(self, message: types.Message, **kwargs):
         """Обработчик команды /reset для сброса контекста AI"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
         chat_id = message.chat.id
         await ChatHistory.increment_reset_id(self.db_pool, chat_id)
         sent_message = await message.reply("Контекст для AI сброшен, мудила. Начинаем с чистого листа!")
@@ -65,33 +65,61 @@ class CommandHandlers:
     @monitor_function
     async def command_stats(self, message: types.Message, **kwargs):
         """Обработчик команды /stats для получения статистики"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
+        
+        # Получаем общую статистику
         stats = monitoring.get_stats()
+        
+        # Получаем статистику по всем чатам
+        chats_stats = monitoring.get_all_chats_stats()
+        
+        # Базовый ответ со статистикой бота
         response = (
             f"📊 Статистика бота:\n\n"
             f"⏱️ Время работы: {stats['uptime']}\n"
             f"💾 Использование памяти: {stats['memory_mb']} МБ\n"
             f"💬 Обработано сообщений: {stats['message_count']}\n"
             f"⌨️ Выполнено команд: {stats['command_count']}\n"
-            f"🌐 API-запросов: {stats['api_request_count']}\n"
-            f"🧠 AI-запросов: {stats['ai_request_count']}\n"
+            f"🧠 AI-запросов (всего): {stats['ai_request_count']}\n"
+            f"🌐 API-запросов (всего): {stats['api_request_count']}\n"
             f"🗄️ Операций с БД: {stats['db_operation_count']}\n"
             f"❌ Ошибок: {stats['error_count']}\n\n"
-            f"🤖 Версия бота: {CODE_VERSION}"
         )
+        
+        # Добавляем статистику по всем чатам
+        if chats_stats["total_chats"] > 0:
+            response += f"📈 Статистика по всем чатам:\n"
+            response += f"🏢 Всего чатов: {chats_stats['total_chats']}\n"
+            response += f"🧠 AI-запросов по всем чатам: {chats_stats['total_ai_requests']}\n"
+            response += f"🌐 API-запросов по всем чатам: {chats_stats['total_api_requests']}\n\n"
+            
+            # Добавляем детальную статистику по каждому чату, если их не слишком много
+            max_chats_to_display = 10
+            if len(chats_stats["chats"]) <= max_chats_to_display:
+                response += f"📋 Детальная статистика по чатам:\n\n"
+                for chat_id, chat_stats in chats_stats["chats"].items():
+                    response += (
+                        f"Чат {chat_id}:\n"
+                        f"- 🧠 AI-запросов: {chat_stats['ai_request_count']}\n"
+                        f"- 🌐 API-запросов: {chat_stats['api_request_count']}\n"
+                        f"- 💬 Сообщений: {chat_stats['message_count']}\n"
+                        f"- ⌨️ Команд: {chat_stats['command_count']}\n\n"
+                    )
+        
+        response += f"🤖 Версия бота: {CODE_VERSION}"
         await message.reply(response)
 
     @monitor_function
     async def command_test(self, message: types.Message, **kwargs):
         """Тестовая команда для проверки работоспособности бота"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
         try:
             # Тестируем базу данных
             db_ok = await self.check_database_health()
             
             # Тестируем API-клиенты
-            weather_test = await ApiClient.get_weather("Minsk,BY")
-            currency_test = await ApiClient.get_currency_rates()
+            weather_test = await ApiClient.get_weather("Minsk,BY", message.chat.id)
+            currency_test = await ApiClient.get_currency_rates(message.chat.id)
             
             response = (
                 f"🧪 Тест системы:\n\n"
@@ -137,7 +165,7 @@ class CommandHandlers:
     @monitor_function
     async def command_team_matches(self, message: types.Message, team_name, **kwargs):
         """Обработчик команд для показа матчей команды"""
-        monitoring.increment_command()
+        monitoring.increment_command(message.chat.id)
         team_id = TEAM_IDS.get(team_name)
         if not team_id:
             sent_message = await message.reply("Команда не найдена, мудила!")
@@ -152,7 +180,7 @@ class CommandHandlers:
                 )
             return
         
-        data = await ApiClient.get_team_matches(team_id)
+        data = await ApiClient.get_team_matches(team_id, message.chat.id)
         if not data or not data.get("response"):
             sent_message = await message.reply("Не удалось получить данные о матчах. Пиздец какой-то!")
             if message.chat.id == TARGET_CHAT_ID:
@@ -178,7 +206,7 @@ class CommandHandlers:
                 if fixture["teams"]["home"]["id"] == team_id else \
                 ("🟢" if away_goals > home_goals else "🔴" if away_goals < home_goals else "🟡")
             
-            events_data = await ApiClient.get_match_events(fixture_id)
+            events_data = await ApiClient.get_match_events(fixture_id, message.chat.id)
             goals_str = "Голы: "
             if events_data and events_data.get("response"):
                 goal_events = [e for e in events_data["response"] if e["type"] == "Goal"]
