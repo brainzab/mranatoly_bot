@@ -10,8 +10,7 @@ from functools import partial
 
 from app.config import (
     TELEGRAM_TOKEN, DATABASE_URL, CODE_VERSION,
-    CHAT_ID, ADMIN_CHAT_ID, BACKUP_ENABLED, MONITORING_ENABLED,
-    DRIVE_ENABLED, CHAT_EXPORT_INTERVAL_HOURS
+    CHAT_ID, ADMIN_CHAT_ID, BACKUP_ENABLED, MONITORING_ENABLED
 )
 from app.services.messages import MorningMessageSender
 from app.services.monitoring import monitoring
@@ -85,36 +84,11 @@ class BotApp:
         # Резервное копирование БД
         if BACKUP_ENABLED:
             self.scheduler.add_job(
-                lambda: backup_database(DATABASE_URL),
-                trigger=CronTrigger(hour=3, minute=0)
-            )
-        
-        # Настройка экспорта истории чатов в Google Drive
-        if DRIVE_ENABLED:
-            from app.services.export import ChatExportService
-            
-            async def export_chats_history():
-                """Функция для экспорта истории чатов с обработкой ошибок"""
-                try:
-                    export_service = ChatExportService(self.db_pool, ADMIN_CHAT_ID, self.bot)
-                    await export_service.export_all_chats_history()
-                except Exception as e:
-                    logger.error(f"Ошибка при запланированном экспорте истории чатов: {e}")
-            
-            # Экспорт чатов по расписанию (по умолчанию - раз в сутки)
-            self.scheduler.add_job(
-                export_chats_history,
-                trigger=CronTrigger(hour=4, minute=0)  # Запускаем в 4 утра
+                backup_database, 
+                args=[DATABASE_URL],
+                trigger=CronTrigger(day_of_week='mon-sun', hour=3, minute=0)  # Каждый день в 3:00
             )
             
-            # Также запускаем экспорт с интервалом, указанным в конфигурации
-            if CHAT_EXPORT_INTERVAL_HOURS > 0 and CHAT_EXPORT_INTERVAL_HOURS != 24:
-                self.scheduler.add_job(
-                    export_chats_history,
-                    'interval', 
-                    hours=CHAT_EXPORT_INTERVAL_HOURS
-                )
-        
         # Логирование использования памяти
         self.scheduler.add_job(
             monitoring.log_memory_usage,
@@ -167,6 +141,11 @@ class BotApp:
         self.dp.message.register(self.command_handlers.command_reset, Command("reset"))
         self.dp.message.register(self.command_handlers.command_stats, Command("stats"))
         self.dp.message.register(self.command_handlers.command_test, Command("test"))
+        self.dp.message.register(self.command_handlers.command_pogoda, Command("pogoda"))
+        self.dp.message.register(self.command_handlers.command_wld, Command("wld"))
+        self.dp.message.register(self.command_handlers.command_rub, Command("rub"))
+        self.dp.message.register(self.command_handlers.command_byn, Command("byn"))
+        self.dp.message.register(self.command_handlers.command_chatstats, Command("chatstats"))
         
         # Команды для футбольных матчей
         self.dp.message.register(
