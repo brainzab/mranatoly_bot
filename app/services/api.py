@@ -37,10 +37,24 @@ class ApiGateway:
         self.request_count = 0
         self.error_count = 0
         
+    def clear_cache(self, cache_key=None):
+        """
+        Очищает весь кэш или только указанный ключ
+        """
+        if cache_key:
+            if cache_key in self.cache:
+                del self.cache[cache_key]
+                logger.info(f"Кэш очищен для ключа {cache_key}")
+        else:
+            self.cache.clear()
+            logger.info("Весь кэш очищен")
+            
     async def request(self, method, url, headers=None, params=None, data=None, 
-                     cache_key=None, cache_ttl=300, chat_id=None):
+                     cache_key=None, cache_ttl=300, chat_id=None, force_fresh=False):
         """
         Выполняет HTTP-запрос с поддержкой кэширования и повторных попыток
+        
+        :param force_fresh: Если True, запрос будет выполнен в обход кэша
         """
         self.request_count += 1
         
@@ -48,8 +62,13 @@ class ApiGateway:
         from app.services.monitoring import monitoring
         monitoring.increment_api_request(chat_id)
         
+        # Если требуется свежий запрос, очищаем кэш для данного ключа
+        if force_fresh and cache_key and cache_key in self.cache:
+            del self.cache[cache_key]
+            logger.debug(f"Кэш очищен для {cache_key} перед новым запросом")
+        
         # Проверяем кэш если нужно
-        if cache_key and cache_key in self.cache:
+        if cache_key and cache_key in self.cache and not force_fresh:
             cache_time, cache_data = self.cache[cache_key]
             if time.time() - cache_time < cache_ttl:
                 logger.debug(f"Возврат кэшированного ответа для {cache_key}")
@@ -140,19 +159,40 @@ class ApiClient:
 
     @staticmethod
     async def get_crypto_prices(chat_id=None):
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,worldcoin&vs_currencies=usd"
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,worldcoin-wld&vs_currencies=usd"
         cache_key = "crypto_prices"
         
         try:
+            # Для крипто-цен всегда запрашиваем свежие данные, игнорируя кэш
             data = await api_gateway.request(
                 method="GET", 
                 url=url,
                 cache_key=cache_key,
                 cache_ttl=3600,  # 1 час
-                chat_id=chat_id
+                chat_id=chat_id,
+                force_fresh=True  # Обходим кэш для получения актуальных данных
             )
             btc_price = data.get('bitcoin', {}).get('usd', 0)
-            wld_price = data.get('worldcoin', {}).get('usd', 0)
+            wld_price = data.get('worldcoin-wld', {}).get('usd', 0)
+            
+            logger.info(f"Получены цены криптовалют: BTC=${btc_price}, WLD=${wld_price}")
+            
+            # Если данные по WLD отсутствуют, пробуем альтернативный ID
+            if wld_price == 0:
+                logger.warning("WLD цена не найдена с ID 'worldcoin-wld', пробуем запрос с ID 'world-coin'")
+                api_gateway.clear_cache(cache_key)
+                
+                alt_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,world-coin&vs_currencies=usd"
+                alt_data = await api_gateway.request(
+                    method="GET", 
+                    url=alt_url,
+                    cache_key=cache_key,
+                    cache_ttl=3600,
+                    chat_id=chat_id
+                )
+                wld_price = alt_data.get('world-coin', {}).get('usd', 0)
+                logger.info(f"Альтернативная WLD цена: ${wld_price}")
+            
             return btc_price, wld_price
         except Exception as e:
             logger.error(f"Ошибка получения цен криптовалют: {e}")
