@@ -72,7 +72,7 @@ class MorningMessageSender:
                 f"💵 *USD/BYN*: {usd_byn_rate:.2f} BYN\n"
                 f"💵 *USD/RUB*: {usd_rub_rate:.2f} RUB\n"
                 f"₿ *BTC*: ${btc_price_usd:,.2f} USD | {btc_price_byn:,.2f} BYN\n"
-                f"🌍 *WLD*: ${wld_price_usd:.2f} USD | {wld_price_byn:.2f} BYN"
+                f"🌍 *WLD*: ${wld_price_usd:.4f} USD | {wld_price_byn:.4f} BYN"
             )
             
             # Отправляем сообщение
