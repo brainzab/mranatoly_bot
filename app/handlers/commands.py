@@ -16,7 +16,7 @@ class CommandHandlers:
         self.db_pool = db_pool
 
     @monitor_function
-    async def command_start(self, message: types.Message):
+    async def command_start(self, message: types.Message, **kwargs):
         """Обработчик команды /start"""
         monitoring.increment_command()
         sent_message = await message.reply(f"Привет, я бот версии {CODE_VERSION}")
@@ -31,7 +31,7 @@ class CommandHandlers:
             )
 
     @monitor_function
-    async def command_version(self, message: types.Message):
+    async def command_version(self, message: types.Message, **kwargs):
         """Обработчик команды /version"""
         monitoring.increment_command()
         sent_message = await message.reply(f"Версия бота: {CODE_VERSION}")
@@ -46,7 +46,7 @@ class CommandHandlers:
             )
 
     @monitor_function
-    async def command_reset(self, message: types.Message):
+    async def command_reset(self, message: types.Message, **kwargs):
         """Обработчик команды /reset для сброса контекста AI"""
         monitoring.increment_command()
         chat_id = message.chat.id
@@ -63,7 +63,7 @@ class CommandHandlers:
             )
 
     @monitor_function
-    async def command_stats(self, message: types.Message):
+    async def command_stats(self, message: types.Message, **kwargs):
         """Обработчик команды /stats для получения статистики"""
         monitoring.increment_command()
         stats = monitoring.get_stats()
@@ -82,7 +82,7 @@ class CommandHandlers:
         await message.reply(response)
 
     @monitor_function
-    async def command_test(self, message: types.Message):
+    async def command_test(self, message: types.Message, **kwargs):
         """Тестовая команда для проверки работоспособности бота"""
         monitoring.increment_command()
         try:
@@ -135,7 +135,7 @@ class CommandHandlers:
             return False
 
     @monitor_function
-    async def command_team_matches(self, message: types.Message, team_name):
+    async def command_team_matches(self, message: types.Message, team_name, **kwargs):
         """Обработчик команд для показа матчей команды"""
         monitoring.increment_command()
         team_id = TEAM_IDS.get(team_name)
