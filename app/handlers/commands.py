@@ -425,3 +425,105 @@ class CommandHandlers:
             logger.error(f"Ошибка при получении курса USD/BYN: {e}")
             error_message = f"Произошла ошибка при получении курса: {e}"
             await message.reply(error_message)
+
+    @monitor_function
+    async def command_chatstats(self, message: types.Message, **kwargs):
+        """Обработчик команды /chatstats для получения статистики сообщений в чате"""
+        monitoring.increment_command(message.chat.id)
+        
+        # Проверяем, что команда вызвана в групповом чате
+        if message.chat.type not in ['group', 'supergroup']:
+            await message.reply("Эта команда доступна только в групповых чатах.")
+            return
+        
+        try:
+            chat_id = message.chat.id
+            
+            # Отправляем сообщение о начале обработки, чтобы пользователь знал, что бот работает
+            wait_message = await message.reply("⏳ Собираю статистику сообщений чата...")
+            
+            # Получаем статистику за разные периоды
+            day_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, chat_id, "day")
+            month_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, chat_id, "month")
+            all_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, chat_id, None)
+            
+            # Если нет сообщений в базе
+            if all_stats["total_messages"] == 0:
+                await message.reply("Статистика недоступна: в базе нет сообщений для этого чата.")
+                await self.bot.delete_message(chat_id=chat_id, message_id=wait_message.message_id)
+                return
+            
+            # Получаем информацию о чате
+            chat_info = await self.bot.get_chat(chat_id)
+            chat_name = chat_info.title or f"Chat {chat_id}"
+            
+            # Получаем имена пользователей
+            all_user_ids = [user_stat["user_id"] for user_stat in all_stats["users"]]
+            usernames = {}
+            
+            for user_id in all_user_ids:
+                try:
+                    chat_member = await self.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+                    user = chat_member.user
+                    
+                    # Формируем имя пользователя
+                    if user.username:
+                        name = f"@{user.username}"
+                    else:
+                        name = user.full_name or f"User {user_id}"
+                    
+                    usernames[user_id] = name
+                except Exception as e:
+                    logger.warning(f"Не удалось получить имя пользователя {user_id}: {e}")
+                    usernames[user_id] = f"User {user_id}"
+            
+            # Формируем ответное сообщение
+            response = f"📊 *Статистика сообщений в чате {chat_name}*\n\n"
+            
+            # Статистика за день
+            response += f"*За последние 24 часа:*\n"
+            response += f"Всего сообщений: {day_stats['total_messages']}\n"
+            if day_stats['users']:
+                response += "Топ отправителей:\n"
+                for i, user in enumerate(day_stats['users'][:5], 1):  # Показываем только топ-5
+                    user_id = user['user_id']
+                    username = usernames.get(user_id, f"User {user_id}")
+                    response += f"{i}. {username}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет данных о сообщениях за этот период\n"
+            
+            response += "\n"
+            
+            # Статистика за месяц
+            response += f"*За последние 30 дней:*\n"
+            response += f"Всего сообщений: {month_stats['total_messages']}\n"
+            if month_stats['users']:
+                response += "Топ отправителей:\n"
+                for i, user in enumerate(month_stats['users'][:5], 1):  # Показываем только топ-5
+                    user_id = user['user_id']
+                    username = usernames.get(user_id, f"User {user_id}")
+                    response += f"{i}. {username}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет данных о сообщениях за этот период\n"
+            
+            response += "\n"
+            
+            # Статистика за все время
+            response += f"*За все время:*\n"
+            response += f"Всего сообщений: {all_stats['total_messages']}\n"
+            if all_stats['users']:
+                response += "Топ отправителей:\n"
+                for i, user in enumerate(all_stats['users'][:10], 1):  # Показываем топ-10 за все время
+                    user_id = user['user_id']
+                    username = usernames.get(user_id, f"User {user_id}")
+                    response += f"{i}. {username}: {user['message_count']} сообщений\n"
+            
+            # Удаляем сообщение о ожидании
+            await self.bot.delete_message(chat_id=chat_id, message_id=wait_message.message_id)
+            
+            # Отправляем ответ
+            await message.reply(response, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении статистики чата: {e}")
+            await message.reply(f"Произошла ошибка при получении статистики: {e}")
