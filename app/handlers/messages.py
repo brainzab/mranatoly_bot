@@ -24,7 +24,7 @@ class MessageHandlers:
             self.bot_info = await self.bot.get_me()
     
     @monitor_function
-    async def handle_message(self, message: types.Message):
+    async def handle_message(self, message: types.Message, **kwargs):
         """Основной обработчик всех входящих сообщений"""
         try:
             if not message.from_user or not message.text:
