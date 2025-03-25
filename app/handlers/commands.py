@@ -721,7 +721,7 @@ class CommandHandlers:
                 })
             
             # Формируем общий ответ
-            response = "📊 **Статистика пользователей по всем чатам**\n\n"
+            response = "📊 Статистика пользователей по всем чатам\n\n"
             
             for chat_data in all_chats_data:
                 chat_name = chat_data["chat_name"]
@@ -731,10 +731,10 @@ class CommandHandlers:
                 all_time_stats = chat_data["all_time_stats"]
                 usernames = chat_data["usernames"]
                 
-                response += f"🔸 **Чат: {chat_name}**\n\n"
+                response += f"🔸 Чат: {chat_name}\n\n"
                 
                 # За 24 часа
-                response += "**За последние 24 часа:**\n"
+                response += "__За последние 24 часа:__\n"
                 if day_stats["total_messages"] > 0:
                     response += f"Всего сообщений: {day_stats['total_messages']}\n"
                     for user in sorted(day_stats["users"], key=lambda x: x["message_count"], reverse=True)[:5]:
@@ -744,7 +744,7 @@ class CommandHandlers:
                 else:
                     response += "Нет сообщений\n"
                 
-                response += "\n**За последнюю неделю:**\n"
+                response += "\n__За последнюю неделю:__\n"
                 if week_stats["total_messages"] > 0:
                     response += f"Всего сообщений: {week_stats['total_messages']}\n"
                     for user in sorted(week_stats["users"], key=lambda x: x["message_count"], reverse=True)[:5]:
@@ -754,7 +754,7 @@ class CommandHandlers:
                 else:
                     response += "Нет сообщений\n"
                     
-                response += "\n**За последний месяц:**\n"
+                response += "\n__За последний месяц:__\n"
                 if month_stats["total_messages"] > 0:
                     response += f"Всего сообщений: {month_stats['total_messages']}\n"
                     for user in sorted(month_stats["users"], key=lambda x: x["message_count"], reverse=True)[:5]:
@@ -764,7 +764,7 @@ class CommandHandlers:
                 else:
                     response += "Нет сообщений\n"
                     
-                response += "\n**За все время:**\n"
+                response += "\n__За все время:__\n"
                 if all_time_stats["total_messages"] > 0:
                     response += f"Всего сообщений: {all_time_stats['total_messages']}\n"
                     for user in sorted(all_time_stats["users"], key=lambda x: x["message_count"], reverse=True)[:5]:
@@ -781,21 +781,26 @@ class CommandHandlers:
             
             # Разбиваем сообщение на части, если оно слишком длинное
             max_length = 4000  # Максимальная длина сообщения в Telegram
+            sent_message = None
+            
             if len(response) > max_length:
                 parts = [response[i:i+max_length] for i in range(0, len(response), max_length)]
-                for part in parts:
-                    await message.reply(part)
+                for i, part in enumerate(parts):
+                    msg = await message.reply(part, parse_mode="Markdown")
+                    # Сохраняем ID только первого сообщения для записи в историю
+                    if i == 0:
+                        sent_message = msg
             else:
                 # Отправляем результат
-                sent_message = await message.reply(response)
+                sent_message = await message.reply(response, parse_mode="Markdown")
             
             # Сохраняем сообщение в историю чата если нужно
-            if message.chat.id == TARGET_CHAT_ID:
+            if message.chat.id == TARGET_CHAT_ID and sent_message:
                 await ChatHistory.save_message(
                     self.db_pool, 
                     message.chat.id, 
                     self.bot.id, 
-                    sent_message.message_id if len(response) <= max_length else message.message_id,
+                    sent_message.message_id,
                     "assistant", 
                     response
                 )
