@@ -104,30 +104,67 @@ class MessageHandlers:
                     text=f"Скачиваю рил из чата {message.chat.title or message.chat.id} 🎥"
                 )
             
+            # Показываем индикатор набора текста, чтобы пользователь знал, что бот работает
+            await message.chat.do_action(action="upload_video")
+            
             # Скачиваем видео
-            video_path = await self.instagram_handler.download_reel(message.text)
-            
-            # Отправляем видео
-            with open(video_path, 'rb') as video:
-                await message.reply_video(
-                    video=video,
-                    caption="Вот твой рил, братишка! 🎥"
-                )
-            
-            # Удаляем сообщение о обработке из админского чата
-            if processing_msg:
-                await processing_msg.delete()
-            
-            # Очищаем временные файлы
-            self.instagram_handler.cleanup(video_path)
-            
-            return True
+            try:
+                video_path = await self.instagram_handler.download_reel(message.text)
+                
+                # Отправляем видео
+                with open(video_path, 'rb') as video:
+                    await message.reply_video(
+                        video=video,
+                        caption="Вот твой рил, братишка! 🎥"
+                    )
+                
+                # Удаляем сообщение о обработке из админского чата
+                if processing_msg:
+                    await processing_msg.delete()
+                
+                # Очищаем временные файлы
+                self.instagram_handler.cleanup(video_path)
+                
+                return True
+                
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"Ошибка при скачивании Instagram Reel: {error_message}")
+                
+                # Определяем тип ошибки для более понятного сообщения пользователю
+                user_message = "Бля, братишка, что-то пошло не так! 😢\n"
+                
+                if "404" in error_message:
+                    user_message += "Рил не найден, возможно он был удален или профиль закрыт."
+                elif "login" in error_message.lower() or "авториз" in error_message.lower():
+                    user_message += "Не могу скачать рил из закрытого профиля."
+                elif "not found" in error_message.lower() or "не найден" in error_message.lower():
+                    user_message += "Видео не найдено, возможно неверная ссылка или контент удалён."
+                elif "connection" in error_message.lower():
+                    user_message += "Проблема с подключением к Instagram. Попробуй позже."
+                elif "timeout" in error_message.lower():
+                    user_message += "Истекло время ожидания ответа от Instagram. Попробуй позже."
+                else:
+                    user_message += "Не удалось скачать видео. Попробуй другую ссылку или позже."
+                
+                # Отправляем сообщение об ошибке пользователю
+                await message.reply(user_message)
+                
+                # Сообщаем о подробностях ошибки в админский чат
+                if processing_msg:
+                    await processing_msg.edit_text(f"Ошибка скачивания рила: {error_message[:200]}")
+                elif message.chat.id != ADMIN_CHAT_ID:
+                    await self.bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"Ошибка скачивания рила из чата {message.chat.title or message.chat.id}: {error_message[:200]}"
+                    )
+                
+                return True
             
         except Exception as e:
-            logger.error(f"Ошибка при обработке Instagram Reel: {e}")
-            if 'processing_msg' in locals() and processing_msg:
-                await processing_msg.edit_text(f"Бля, братишка, что-то пошло не так! 😢\nОшибка: {str(e)}")
-            return False
+            logger.error(f"Критическая ошибка при обработке Instagram Reel: {e}")
+            await message.reply("Бля, братишка, произошла непредвиденная ошибка при обработке ссылки! 😢")
+            return True
 
     async def _process_template_responses(self, message):
         """Обрабатывает шаблонные ответы на определенные сообщения"""

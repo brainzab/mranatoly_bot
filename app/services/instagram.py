@@ -312,6 +312,8 @@ class InstagramHandler:
             
             # Список сервисов для скачивания
             services = [
+                self._download_via_ssinsta,   # Добавляем SSInsta как самый первый приоритетный сервис
+                self._download_via_savefrom,  # SaveFrom.net вторым
                 self._download_via_rapidapi,
                 self._download_via_snapinsta,
                 self._download_via_saveinsta
@@ -330,6 +332,153 @@ class InstagramHandler:
             
         except Exception as e:
             logger.error(f"Ошибка при скачивании через сторонние сервисы: {e}")
+            raise
+    
+    async def _download_via_ssinsta(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через SSInsta (ssyoutube)"""
+        try:
+            logger.info(f"Скачиваем видео через SSInsta: {shortcode}")
+            
+            # Преобразуем URL в формат ssyoutube
+            ss_url = url.replace("instagram.com", "sssinstagram.com")
+            
+            # Настройки запроса
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://sssinstagram.com',
+            }
+            
+            # Отправляем запрос
+            session = requests.Session()
+            response = session.get(ss_url, headers=headers)
+            
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка доступа к SSInsta: {response.status_code}")
+            
+            # Ищем URL видео в HTML
+            html = response.text
+            
+            # Различные шаблоны для поиска URL видео
+            video_patterns = [
+                r'<a[^>]*href="([^"]+\.mp4[^"]*)"[^>]*download',
+                r'"contentUrl"\s*:\s*"(https://[^"]+\.mp4[^"]*)"',
+                r'<source[^>]*src="([^"]+\.mp4[^"]*)"',
+                r'<video[^>]*src="([^"]+\.mp4[^"]*)"',
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                matches = re.findall(pattern, html)
+                if matches:
+                    for match in matches:
+                        if ".mp4" in match:
+                            video_url = match
+                            break
+                    if video_url:
+                        break
+            
+            if not video_url:
+                # Ищем по JSON данным, которые могут быть встроены в страницу
+                json_pattern = r'<script[^>]*type="application/json"[^>]*>(.*?)</script>'
+                json_matches = re.findall(json_pattern, html, re.DOTALL)
+                
+                for json_data in json_matches:
+                    try:
+                        data = json.loads(json_data)
+                        if isinstance(data, dict) and "url" in data:
+                            possible_url = data.get("url")
+                            if isinstance(possible_url, str) and ".mp4" in possible_url:
+                                video_url = possible_url
+                                break
+                    except Exception:
+                        continue
+            
+            if not video_url:
+                # Если все еще не найдено, сохраняем HTML для дебага
+                debug_path = os.path.join(temp_path, "debug_ssinsta.html")
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                raise ValueError(f"Не удалось найти URL видео в ответе SSInsta. HTML сохранен в {debug_path}")
+            
+            # Исправляем URL если необходимо
+            if not video_url.startswith("http"):
+                video_url = "https:" + video_url if video_url.startswith("//") else "https://" + video_url
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_ssinsta.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через SSInsta: {e}")
+            raise
+    
+    async def _download_via_savefrom(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через SaveFrom.net"""
+        try:
+            logger.info(f"Скачиваем видео через SaveFrom.net: {shortcode}")
+            
+            # Настройки запроса для получения данных с SaveFrom
+            api_url = "https://ru.savefrom.net/api/convert"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Content-Type': 'application/json',
+                'Origin': 'https://ru.savefrom.net',
+                'Referer': 'https://ru.savefrom.net/25-instagram-reels-download.html',
+            }
+            
+            # Формируем данные для запроса
+            data = {
+                "url": url,
+                "lang": "ru",
+            }
+            
+            # Отправляем запрос
+            session = requests.Session()
+            response = session.post(api_url, headers=headers, json=data)
+            
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка API SaveFrom: {response.status_code}")
+            
+            # Парсим JSON ответ
+            result = response.json()
+            
+            # Проверяем наличие ошибок
+            if result.get("error"):
+                raise ValueError(f"Ошибка SaveFrom API: {result.get('error')}")
+            
+            # Находим URL видео в ответе
+            media_data = result.get("url") or []
+            if not media_data:
+                raise ValueError("Пустой ответ от SaveFrom.net")
+            
+            # Ищем видео с наилучшим качеством
+            video_url = None
+            max_quality = 0
+            
+            for item in media_data:
+                if item.get("url") and item.get("type") == "mp4":
+                    quality = item.get("quality", 0)
+                    if quality > max_quality:
+                        max_quality = quality
+                        video_url = item["url"]
+            
+            if not video_url:
+                raise ValueError("Не удалось найти URL видео в ответе SaveFrom.net")
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_savefrom.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через SaveFrom.net: {e}")
             raise
     
     async def _download_via_rapidapi(self, url: str, shortcode: str, temp_path: str) -> str:
