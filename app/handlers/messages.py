@@ -143,7 +143,7 @@ class MessageHandlers:
         ai_response = await AiHandler.get_ai_response(chat_history, query)
         
         # Отправляем ответ
-        sent_message = await message.reply(ai_response)
+        sent_message = await message.reply(ai_response, parse_mode="Markdown")
         
         # Сохраняем ответ бота в историю чата
         if message.chat.id == TARGET_CHAT_ID:
