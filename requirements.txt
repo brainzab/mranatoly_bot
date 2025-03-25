@@ -8,5 +8,3 @@ asyncpg==0.29.0
 pytest==8.3.2
 pytest-asyncio==0.23.8
 psutil==5.9.4
-instaloader==4.10.3
-pyotp==2.9.0
