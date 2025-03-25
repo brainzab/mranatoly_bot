@@ -30,7 +30,23 @@ class InstagramHandler:
             return None
         
         try:
-            totp = pyotp.TOTP(INSTAGRAM_2FA_SECRET)
+            # Очищаем секрет от лишних символов и приводим к base32
+            secret = INSTAGRAM_2FA_SECRET.replace(' ', '').replace('-', '').upper()
+            # Удаляем все символы, не входящие в алфавит Base32
+            base32_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+            secret = ''.join(c for c in secret if c in base32_alphabet)
+            
+            # Проверяем валидность очищенного секрета
+            if not secret or len(secret) < 16:
+                logger.error(f"Секретный ключ 2FA недействителен или слишком короткий после очистки: {len(secret)} символов")
+                return None
+                
+            # Дополняем строку символами = если длина не кратна 8
+            if len(secret) % 8 != 0:
+                secret += '=' * (8 - len(secret) % 8)
+                
+            logger.info(f"Длина очищенного секретного ключа 2FA: {len(secret)} символов")
+            totp = pyotp.TOTP(secret)
             return totp.now()
         except Exception as e:
             logger.error(f"Ошибка при генерации 2FA кода: {e}")
