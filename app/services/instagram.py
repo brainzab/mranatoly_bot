@@ -312,8 +312,11 @@ class InstagramHandler:
             
             # Список сервисов для скачивания
             services = [
-                self._download_via_ssinsta,   # Добавляем SSInsta как самый первый приоритетный сервис
-                self._download_via_savefrom,  # SaveFrom.net вторым
+                self._download_via_instadownloader, # Первый приоритет - InstaDownloader
+                self._download_via_rapidsave,       # Второй - RapidSave
+                self._download_via_web_savefrom,    # Третий - веб-интерфейс SaveFrom.net
+                self._download_via_ssinsta,         # Четвертый - SSInsta
+                self._download_via_savefrom,        # Пятый - API SaveFrom.net
                 self._download_via_rapidapi,
                 self._download_via_snapinsta,
                 self._download_via_saveinsta
@@ -332,6 +335,317 @@ class InstagramHandler:
             
         except Exception as e:
             logger.error(f"Ошибка при скачивании через сторонние сервисы: {e}")
+            raise
+    
+    async def _download_via_instadownloader(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через InstaDownloader.co"""
+        try:
+            logger.info(f"Скачиваем видео через InstaDownloader: {shortcode}")
+            
+            # Настройки запроса для открытия страницы InstaDownloader
+            main_url = "https://instadownloader.co/"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Создаем сессию для сохранения cookies
+            session = requests.Session()
+            
+            # Открываем главную страницу
+            main_response = session.get(main_url, headers=headers)
+            if main_response.status_code != 200:
+                raise ValueError(f"Ошибка при открытии страницы InstaDownloader: {main_response.status_code}")
+            
+            # Настройки для отправки URL на обработку
+            download_url = "https://instadownloader.co/instagram-reels-downloader"
+            download_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://instadownloader.co',
+                'Referer': main_url,
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Данные для отправки
+            download_data = {
+                'url': url,
+            }
+            
+            # Отправляем URL для обработки
+            download_response = session.post(download_url, headers=download_headers, data=download_data)
+            if download_response.status_code != 200:
+                raise ValueError(f"Ошибка при отправке URL в InstaDownloader: {download_response.status_code}")
+            
+            # Получаем HTML с результатами
+            result_html = download_response.text
+            
+            # Ищем ссылку на скачивание видео с самым высоким качеством
+            video_patterns = [
+                r'href="(https?://[^"]+\.mp4[^"]*)"[^>]*download[^>]*data-quality="hd"',
+                r'href="(https?://[^"]+\.mp4[^"]*)"[^>]*data-quality="hd"[^>]*download',
+                r'href="(https?://[^"]+\.mp4[^"]*)"[^>]*download',
+                r'src="(https?://[^"]+\.mp4[^"]*)"',
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                matches = re.findall(pattern, result_html)
+                if matches:
+                    for match in matches:
+                        if match and '.mp4' in match:
+                            video_url = match
+                            logger.info(f"Найден URL видео в InstaDownloader: {video_url[:50]}...")
+                            break
+                    if video_url:
+                        break
+            
+            if not video_url:
+                # Ищем видео в JavaScript
+                js_pattern = r'file\s*:\s*[\'"]([^\'"]*)[\'"]\s*,\s*type\s*:\s*[\'"]video/mp4[\'"]'
+                js_matches = re.findall(js_pattern, result_html)
+                if js_matches:
+                    video_url = js_matches[0]
+                    logger.info(f"Найден JS URL видео в InstaDownloader: {video_url[:50]}...")
+            
+            if not video_url:
+                # Сохраняем HTML для отладки
+                debug_html_path = os.path.join(temp_path, "debug_instadownloader.html")
+                with open(debug_html_path, "w", encoding="utf-8") as f:
+                    f.write(result_html)
+                raise ValueError(f"Не удалось найти URL видео в ответе InstaDownloader. HTML сохранен в {debug_html_path}")
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_instadownloader.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через InstaDownloader: {e}")
+            raise
+    
+    async def _download_via_rapidsave(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через RapidSave.com"""
+        try:
+            logger.info(f"Скачиваем видео через RapidSave: {shortcode}")
+            
+            # Настройки запроса для открытия страницы RapidSave
+            main_url = "https://www.rapidsave.com/ru/instagram-video-downloader"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Создаем сессию для сохранения cookies
+            session = requests.Session()
+            
+            # Открываем главную страницу
+            main_response = session.get(main_url, headers=headers)
+            if main_response.status_code != 200:
+                raise ValueError(f"Ошибка при открытии страницы RapidSave: {main_response.status_code}")
+            
+            # Получаем основной HTML
+            html = main_response.text
+            
+            # Настройки для отправки URL на обработку через API
+            api_url = "https://www.rapidsave.com/api/ajaxSearch"
+            api_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://www.rapidsave.com',
+                'Referer': main_url,
+            }
+            
+            # Данные для отправки
+            api_data = {
+                'q': url,
+                't': 'media',
+                'lang': 'ru'
+            }
+            
+            # Отправляем URL для обработки
+            api_response = session.post(api_url, headers=api_headers, data=api_data)
+            if api_response.status_code != 200:
+                raise ValueError(f"Ошибка при отправке URL в RapidSave API: {api_response.status_code}")
+            
+            # Парсим JSON ответ
+            try:
+                result = api_response.json()
+            except Exception as e:
+                debug_path = os.path.join(temp_path, "debug_rapidsave.txt")
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    f.write(api_response.text)
+                raise ValueError(f"Не удалось распарсить JSON ответ от RapidSave: {e}. Ответ сохранен в {debug_path}")
+            
+            # Получаем HTML с результатами
+            if not result.get('data'):
+                raise ValueError("Пустой результат от RapidSave")
+            
+            result_html = result['data']
+            
+            # Ищем ссылку на скачивание видео
+            video_patterns = [
+                r'href="(https?://[^"]+\.mp4[^"]*)"[^>]*download',
+                r'href="(https?://[^"]+)"[^>]*download[^>]*>.*?HD',
+                r'href="(https?://[^"]+)"[^>]*download',
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                matches = re.findall(pattern, result_html)
+                if matches:
+                    for match in matches:
+                        if match and '://' in match:
+                            video_url = match
+                            logger.info(f"Найден URL видео в RapidSave: {video_url[:50]}...")
+                            break
+                    if video_url:
+                        break
+            
+            if not video_url:
+                # Сохраняем HTML для отладки
+                debug_html_path = os.path.join(temp_path, "debug_rapidsave.html")
+                with open(debug_html_path, "w", encoding="utf-8") as f:
+                    f.write(result_html)
+                raise ValueError(f"Не удалось найти URL видео в ответе RapidSave. HTML сохранен в {debug_html_path}")
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_rapidsave.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через RapidSave: {e}")
+            raise
+    
+    async def _download_via_web_savefrom(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через веб-интерфейс SaveFrom.net"""
+        try:
+            logger.info(f"Скачиваем видео через веб-интерфейс SaveFrom.net: {shortcode}")
+            
+            # Настройки запроса для открытия страницы SaveFrom
+            main_url = "https://ru.savefrom.net/25-instagram-reels-download.html"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://ru.savefrom.net/',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+            }
+            
+            # Создаем сессию для сохранения cookies
+            session = requests.Session()
+            
+            # Открываем главную страницу
+            main_response = session.get(main_url, headers=headers)
+            if main_response.status_code != 200:
+                raise ValueError(f"Ошибка при открытии страницы SaveFrom: {main_response.status_code}")
+            
+            # Получаем основной HTML
+            html = main_response.text
+            
+            # Ищем форму и токен CSRF
+            sf_token_match = re.search(r'name=["\']sf_token["\'] value=["\'](.*?)["\']', html)
+            if not sf_token_match:
+                raise ValueError("Не удалось найти CSRF токен на странице SaveFrom")
+            
+            sf_token = sf_token_match.group(1)
+            
+            # Настройки для отправки URL на обработку
+            submit_url = "https://ru.savefrom.net/25-instagram-reels-download.html"
+            submit_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://ru.savefrom.net',
+                'Referer': main_url,
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+            }
+            
+            # Данные для отправки
+            submit_data = {
+                'sf_url': url,
+                'sf_token': sf_token,
+                'sf_submit': 'Скачать',
+            }
+            
+            # Отправляем URL для обработки
+            submit_response = session.post(submit_url, headers=submit_headers, data=submit_data)
+            if submit_response.status_code != 200:
+                raise ValueError(f"Ошибка при отправке URL в SaveFrom: {submit_response.status_code}")
+            
+            # Получаем HTML с результатами
+            result_html = submit_response.text
+            
+            # Ищем ссылку на скачивание mp4 видео
+            video_patterns = [
+                r'href="(https?://[^"]+\.mp4[^"]*)"[^>]*download',
+                r'href="(https?://[^"]+)"[^>]*download[^>]*\.mp4',
+                r'(https?://[^"]+\.mp4[^"]*)',
+                r'data-url="(https?://[^"]+\.mp4[^"]*)"',
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                matches = re.findall(pattern, result_html)
+                if matches:
+                    for match in matches:
+                        if ".mp4" in match:
+                            video_url = match
+                            logger.info(f"Найден URL видео: {video_url[:50]}...")
+                            break
+                    if video_url:
+                        break
+            
+            if not video_url:
+                # Если не найден прямой URL, ищем URL с JavaScript обработчиком
+                js_url_pattern = r'onclick="[^"]*href=\'([^\']+\.mp4[^\']*)\'"'
+                js_matches = re.findall(js_url_pattern, result_html)
+                if js_matches:
+                    video_url = js_matches[0]
+                    logger.info(f"Найден JS URL видео: {video_url[:50]}...")
+            
+            if not video_url:
+                # Сохраняем HTML для отладки
+                debug_html_path = os.path.join(temp_path, "debug_savefrom_web.html")
+                with open(debug_html_path, "w", encoding="utf-8") as f:
+                    f.write(result_html)
+                raise ValueError(f"Не удалось найти URL видео на странице SaveFrom. HTML сохранен в {debug_html_path}")
+            
+            # Если URL начинается с //, добавляем https:
+            if video_url.startswith('//'):
+                video_url = 'https:' + video_url
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_savefrom_web.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через веб-интерфейс SaveFrom: {e}")
             raise
     
     async def _download_via_ssinsta(self, url: str, shortcode: str, temp_path: str) -> str:
@@ -615,20 +929,52 @@ class InstagramHandler:
             raise
     
     def _download_file(self, url: str, path: str):
-        """Скачивает файл по URL"""
+        """Скачивает файл по URL с повторными попытками и обработкой ошибок"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
             }
             
-            with requests.get(url, headers=headers, stream=True) as r:
-                r.raise_for_status()
-                with open(path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
+            max_retries = 3
+            retry_delay = 2
+            timeout_seconds = 15
             
-            logger.info(f"Файл успешно скачан: {path}")
-            return path
+            for attempt in range(max_retries):
+                try:
+                    with requests.get(url, headers=headers, stream=True, timeout=timeout_seconds) as r:
+                        r.raise_for_status()
+                        total_size = int(r.headers.get('content-length', 0))
+                        downloaded = 0
+                        
+                        with open(path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    
+                        # Проверяем, что файл не нулевого размера и скачан полностью
+                        if os.path.getsize(path) == 0:
+                            raise ValueError("Скачан файл нулевого размера")
+                            
+                        if total_size > 0 and os.path.getsize(path) < total_size * 0.95:
+                            raise ValueError(f"Файл скачан не полностью: {os.path.getsize(path)}/{total_size} байт")
+                            
+                        logger.info(f"Файл успешно скачан: {path}, размер: {os.path.getsize(path)} байт")
+                        return path
+                        
+                except (requests.exceptions.RequestException, ValueError) as e:
+                    if attempt < max_retries - 1:
+                        error_msg = str(e)
+                        logger.warning(f"Ошибка при скачивании файла (попытка {attempt+1}/{max_retries}): {error_msg}")
+                        time.sleep(retry_delay)
+                    else:
+                        raise
+            
+            raise ValueError(f"Не удалось скачать файл после {max_retries} попыток")
+            
         except Exception as e:
             logger.error(f"Ошибка при скачивании файла: {e}")
             raise
