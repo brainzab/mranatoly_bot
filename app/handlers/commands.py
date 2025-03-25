@@ -537,8 +537,14 @@ class CommandHandlers:
         # Проверка прав администратора
         is_admin = False
         try:
-            chat_member = await self.bot.get_chat_member(message.chat.id, message.from_user.id)
-            is_admin = chat_member.status in ["administrator", "creator"]
+            # Если это личный чат, считаем, что это разрешенный пользователь
+            if message.chat.type == 'private':
+                from app.config import ADMIN_CHAT_ID
+                is_admin = message.from_user.id == ADMIN_CHAT_ID
+            else:
+                # В групповых чатах проверяем права администратора
+                chat_member = await self.bot.get_chat_member(message.chat.id, message.from_user.id)
+                is_admin = chat_member.status in ["administrator", "creator"]
         except Exception as e:
             logger.error(f"Ошибка при проверке прав администратора: {e}")
         
