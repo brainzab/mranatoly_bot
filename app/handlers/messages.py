@@ -1,13 +1,15 @@
 import logging
 import random
+import re
 from aiogram import types
 from aiogram.types import ReactionTypeEmoji
 from app.services.ai import AiHandler
+from app.services.instagram import InstagramHandler
 from app.database.models import ChatHistory
 from app.config import (
     TARGET_USER_ID, TARGET_CHAT_ID, RESPONSES_SOSAL, 
     RARE_RESPONSE_SOSAL, RESPONSE_LETAL, RESPONSES_SCAMIL, TARGET_REACTION,
-    REACTION_ENABLED, REACTION_TARGET_USER_ID
+    REACTION_ENABLED, REACTION_TARGET_USER_ID, ADMIN_CHAT_ID
 )
 from app.services.monitoring import monitoring, monitor_function
 
@@ -18,6 +20,7 @@ class MessageHandlers:
         self.bot = bot
         self.db_pool = db_pool
         self.bot_info = None
+        self.instagram_handler = InstagramHandler()
     
     async def init_bot_info(self):
         """Инициализирует информацию о боте"""
@@ -50,6 +53,10 @@ class MessageHandlers:
             if REACTION_ENABLED:
                 await self._process_reactions(message)
             
+            # Обрабатываем Instagram Reels
+            if await self._process_instagram_reel(message):
+                return
+            
             # Обрабатываем шаблонные ответы
             if await self._process_template_responses(message):
                 return
@@ -81,6 +88,46 @@ class MessageHandlers:
                 )
             except Exception as e:
                 logger.error(f"Ошибка при установке реакции: {e}")
+
+    async def _process_instagram_reel(self, message: types.Message) -> bool:
+        """Обрабатывает ссылки на Instagram Reels"""
+        try:
+            # Проверяем, содержит ли сообщение ссылку на Instagram Reel
+            if not re.search(r'instagram\.com/(reel|p|tv)/[A-Za-z0-9_-]+', message.text):
+                return False
+            
+            # Отправляем сообщение о начале обработки только в админский чат
+            processing_msg = None
+            if message.chat.id != ADMIN_CHAT_ID:
+                processing_msg = await self.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"Скачиваю рил из чата {message.chat.title or message.chat.id} 🎥"
+                )
+            
+            # Скачиваем видео
+            video_path = await self.instagram_handler.download_reel(message.text)
+            
+            # Отправляем видео
+            with open(video_path, 'rb') as video:
+                await message.reply_video(
+                    video=video,
+                    caption="Вот твой рил, братишка! 🎥"
+                )
+            
+            # Удаляем сообщение о обработке из админского чата
+            if processing_msg:
+                await processing_msg.delete()
+            
+            # Очищаем временные файлы
+            self.instagram_handler.cleanup(video_path)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке Instagram Reel: {e}")
+            if 'processing_msg' in locals() and processing_msg:
+                await processing_msg.edit_text(f"Бля, братишка, что-то пошло не так! 😢\nОшибка: {str(e)}")
+            return False
 
     async def _process_template_responses(self, message):
         """Обрабатывает шаблонные ответы на определенные сообщения"""
