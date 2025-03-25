@@ -76,40 +76,117 @@ class MorningMessageSender:
             crypto_task = ApiClient.get_crypto_prices(TARGET_CHAT_ID)
             wish_task = self.get_ai_wish_by_day()
             
-            # Собираем результаты
-            results = await asyncio.gather(
-                *weather_tasks,
-                currency_task,
-                crypto_task,
-                wish_task,
-                return_exceptions=True
-            )
+            # Добавляем логирование для диагностики
+            logger.info(f"Запущены задачи: погода ({len(weather_tasks)}), валюты, крипта, пожелание")
             
-            # Обрабатываем результаты
-            weather_results = results[:len(cities)]
-            usd_byn_rate, usd_rub_rate = results[len(cities)]
-            btc_price_usd, wld_price_usd = results[len(cities) + 1]
-            ai_wish = results[len(cities) + 2] if not isinstance(results[len(cities) + 2], Exception) else "❤️ Хорошего всем дня!"
+            # Собираем результаты с таймаутом для каждой задачи
+            weather_results = []
+            for i, task in enumerate(weather_tasks):
+                try:
+                    result = await asyncio.wait_for(task, timeout=10)  # 10 секунд таймаут
+                    weather_results.append(result)
+                    logger.info(f"Получена погода {i+1}/{len(weather_tasks)}")
+                except asyncio.TimeoutError:
+                    logger.error(f"Таймаут при получении погоды {i+1}/{len(weather_tasks)}")
+                    weather_results.append("Нет данных (таймаут)")
+                except Exception as e:
+                    logger.error(f"Ошибка при получении погоды {i+1}/{len(weather_tasks)}: {e}")
+                    weather_results.append(f"Нет данных ({str(e)[:20]})")
+            
+            # Получаем курсы валют
+            try:
+                usd_byn_rate, usd_rub_rate = await asyncio.wait_for(currency_task, timeout=10)
+                logger.info("Получены курсы валют")
+            except asyncio.TimeoutError:
+                logger.error("Таймаут при получении курсов валют")
+                usd_byn_rate, usd_rub_rate = "?", "?"
+            except Exception as e:
+                logger.error(f"Ошибка при получении курсов валют: {e}")
+                usd_byn_rate, usd_rub_rate = "?", "?"
+            
+            # Получаем криптовалюты
+            try:
+                btc_price_usd, wld_price_usd = await asyncio.wait_for(crypto_task, timeout=10)
+                logger.info("Получены цены криптовалют")
+            except asyncio.TimeoutError:
+                logger.error("Таймаут при получении цен криптовалют")
+                btc_price_usd, wld_price_usd = "?", "?"
+            except Exception as e:
+                logger.error(f"Ошибка при получении цен криптовалют: {e}")
+                btc_price_usd, wld_price_usd = "?", "?"
+            
+            # Получаем пожелание
+            try:
+                ai_wish = await asyncio.wait_for(wish_task, timeout=20)  # AI может дольше отвечать
+                logger.info(f"Получено пожелание: {ai_wish[:30]}...")
+            except asyncio.TimeoutError:
+                logger.error("Таймаут при получении пожелания от AI")
+                ai_wish = "❤️ Хорошего всем дня! Извините, у меня проблемы со связью."
+            except Exception as e:
+                logger.error(f"Ошибка при получении пожелания: {e}")
+                ai_wish = f"❤️ Хорошего всем дня! Что-то пошло не так: {str(e)[:30]}"
             
             weather_data = dict(zip(cities.keys(), weather_results))
             
             # Рассчитываем цены в BYN
-            btc_price_byn = float(btc_price_usd) * float(usd_byn_rate) if btc_price_usd and usd_byn_rate else 0
-            wld_price_byn = float(wld_price_usd) * float(usd_byn_rate) if wld_price_usd and usd_byn_rate else 0
+            try:
+                btc_price_byn = float(btc_price_usd) * float(usd_byn_rate) if btc_price_usd not in ("?", None) and usd_byn_rate not in ("?", None) else "?"
+                wld_price_byn = float(wld_price_usd) * float(usd_byn_rate) if wld_price_usd not in ("?", None) and usd_byn_rate not in ("?", None) else "?"
+            except (ValueError, TypeError) as e:
+                logger.error(f"Ошибка при расчете цен в BYN: {e}")
+                btc_price_byn, wld_price_byn = "?", "?"
+            
+            # Форматируем строки для вывода
+            def format_price(price):
+                if price == "?":
+                    return "?"
+                try:
+                    if isinstance(price, (int, float)) and price > 1000:
+                        return f"{price:,.2f}"
+                    elif isinstance(price, (int, float)):
+                        return f"{price:.4f}" if price < 1 else f"{price:.2f}"
+                    return price
+                except Exception:
+                    return str(price)
             
             # Формируем сообщение
             message = (
                 "Родные мои, всем доброе утро и хорошего дня! ❤️\n\n"
                 "*Положняк по погоде:*\n"
-                + "\n".join(f"🌥 *{city}*: {data if not isinstance(data, Exception) else 'Нет данных'}" 
+                + "\n".join(f"🌥 *{city}*: {data}" 
                           for city, data in weather_data.items()) + "\n\n"
                 "*Положняк по курсам:*\n"
-                f"💵 *USD/BYN*: {usd_byn_rate:.2f} BYN\n"
-                f"💵 *USD/RUB*: {usd_rub_rate:.2f} RUB\n"
-                f"₿ *BTC*: ${btc_price_usd:,.2f} USD | {btc_price_byn:,.2f} BYN\n"
-                f"🌍 *WLD*: ${wld_price_usd:.4f} USD | {wld_price_byn:.4f} BYN\n\n"
-                f"{ai_wish}"
             )
+            
+            # Добавляем данные по курсам в зависимости от их наличия
+            if usd_byn_rate != "?":
+                message += f"💵 *USD/BYN*: {format_price(usd_byn_rate)} BYN\n"
+            else:
+                message += "💵 *USD/BYN*: Нет данных\n"
+                
+            if usd_rub_rate != "?":
+                message += f"💵 *USD/RUB*: {format_price(usd_rub_rate)} RUB\n"
+            else:
+                message += "💵 *USD/RUB*: Нет данных\n"
+                
+            if btc_price_usd != "?":
+                if btc_price_byn != "?":
+                    message += f"₿ *BTC*: ${format_price(btc_price_usd)} USD | {format_price(btc_price_byn)} BYN\n"
+                else:
+                    message += f"₿ *BTC*: ${format_price(btc_price_usd)} USD\n"
+            else:
+                message += "₿ *BTC*: Нет данных\n"
+                
+            if wld_price_usd != "?":
+                if wld_price_byn != "?":
+                    message += f"🌍 *WLD*: ${format_price(wld_price_usd)} USD | {format_price(wld_price_byn)} BYN\n\n"
+                else:
+                    message += f"🌍 *WLD*: ${format_price(wld_price_usd)} USD\n\n"
+            else:
+                message += "🌍 *WLD*: Нет данных\n\n"
+            
+            # Добавляем пожелание
+            message += f"{ai_wish}"
             
             # Отправляем сообщение
             sent_message = await self.bot.send_message(
@@ -118,10 +195,30 @@ class MorningMessageSender:
                 parse_mode="MARKDOWN"
             )
             
-            logger.info("Утреннее сообщение отправлено")
+            logger.info("Утреннее сообщение отправлено успешно")
+            
+            # Также отправляем сообщение в канал мониторинга
+            from app.config import MONITORING_ENABLED, ADMIN_CHAT_ID
+            if MONITORING_ENABLED and ADMIN_CHAT_ID != CHAT_ID:
+                await self.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text="✅ Утреннее сообщение успешно отправлено в чат"
+                )
+            
             return sent_message
             
         except Exception as e:
             logger.error(f"Ошибка при отправке утреннего сообщения: {e}")
-            # Можно добавить оповещение администратора
+            # Отправляем информацию об ошибке администратору
+            from app.config import MONITORING_ENABLED, ADMIN_CHAT_ID
+            if MONITORING_ENABLED:
+                from app.services.monitoring import monitoring
+                monitoring.log_error(e, {"context": "morning_message"})
+                try:
+                    await self.bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"❌ Ошибка при отправке утреннего сообщения: {e}"
+                    )
+                except Exception as send_error:
+                    logger.error(f"Не удалось отправить уведомление об ошибке: {send_error}")
             return None

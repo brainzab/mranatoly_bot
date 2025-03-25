@@ -6,7 +6,8 @@ from app.services.ai import AiHandler
 from app.database.models import ChatHistory
 from app.config import (
     TARGET_USER_ID, TARGET_CHAT_ID, RESPONSES_SOSAL, 
-    RARE_RESPONSE_SOSAL, RESPONSE_LETAL, RESPONSES_SCAMIL, TARGET_REACTION
+    RARE_RESPONSE_SOSAL, RESPONSE_LETAL, RESPONSES_SCAMIL, TARGET_REACTION,
+    REACTION_ENABLED, REACTION_TARGET_USER_ID
 )
 from app.services.monitoring import monitoring, monitor_function
 
@@ -46,7 +47,8 @@ class MessageHandlers:
                 await self._save_message_safe(chat_id, user_id, message_id, "user", message.text)
             
             # Обрабатываем реакции если нужно
-            await self._process_reactions(message)
+            if REACTION_ENABLED:
+                await self._process_reactions(message)
             
             # Обрабатываем шаблонные ответы
             if await self._process_template_responses(message):
@@ -70,7 +72,7 @@ class MessageHandlers:
 
     async def _process_reactions(self, message):
         """Обрабатывает реакции на сообщения"""
-        if message.from_user.id == TARGET_USER_ID:
+        if message.from_user.id == REACTION_TARGET_USER_ID and TARGET_REACTION:
             try:
                 await self.bot.set_message_reaction(
                     chat_id=message.chat.id,

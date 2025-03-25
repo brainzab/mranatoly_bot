@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from functools import partial
+from datetime import datetime, timedelta
 
 from app.config import (
     TELEGRAM_TOKEN, DATABASE_URL, CODE_VERSION,
@@ -62,10 +63,24 @@ class BotApp:
         # Запуск планировщика
         self.scheduler = AsyncIOScheduler(timezone=pytz.timezone('Europe/Moscow'))
         
-        # Утренние сообщения
+        # Утренние сообщения - запускаем через минуту после запуска и затем каждый день в 7:30
         self.scheduler.add_job(
             self.morning_sender.send_morning_message, 
             trigger=CronTrigger(hour=7, minute=30)
+        )
+        
+        # Добавляем еще одну задачу для безопасного запуска утреннего сообщения через минуту после запуска
+        self.scheduler.add_job(
+            self.morning_sender.send_morning_message,
+            trigger='date',
+            run_date=datetime.now() + timedelta(minutes=1),
+            id='initial_morning_message'
+        )
+        
+        # Вечерняя статистика - отправляем каждый день в 21:00
+        self.scheduler.add_job(
+            self._send_evening_stats,
+            trigger=CronTrigger(hour=21, minute=0)
         )
         
         # Очистка старых сообщений
@@ -146,6 +161,7 @@ class BotApp:
         self.dp.message.register(self.command_handlers.command_rub, Command("rub"))
         self.dp.message.register(self.command_handlers.command_byn, Command("byn"))
         self.dp.message.register(self.command_handlers.command_chatstats, Command("chatstats"))
+        self.dp.message.register(self.command_handlers.command_reaction, Command("reaction"))
         
         # Команды для футбольных матчей
         self.dp.message.register(
@@ -176,3 +192,33 @@ class BotApp:
                 monitoring.log_error(e, {"context": "bot_polling"})
         finally:
             await self.on_shutdown()
+
+    async def _send_evening_stats(self):
+        """Отправляет вечернюю статистику в чат"""
+        try:
+            logger.info("Отправка вечерней статистики")
+            
+            # Получаем общую статистику
+            stats = monitoring.get_stats()
+            
+            # Формируем сообщение со статистикой
+            message = (
+                f"📊 Статистика за день:\n\n"
+                f"⏱️ Время работы бота: {stats['uptime']}\n"
+                f"💬 Обработано сообщений: {stats['message_count']}\n"
+                f"⌨️ Команд выполнено: {stats['command_count']}\n"
+                f"🧠 AI-запросов: {stats['ai_request_count']}\n"
+                f"❌ Ошибок: {stats['error_count']}"
+            )
+            
+            # Отправляем в основной чат
+            await self.bot.send_message(
+                chat_id=CHAT_ID,
+                text=message
+            )
+            
+            logger.info("Вечерняя статистика отправлена")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке вечерней статистики: {e}")
+            if MONITORING_ENABLED:
+                monitoring.log_error(e, {"context": "evening_stats"})

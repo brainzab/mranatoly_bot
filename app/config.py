@@ -49,6 +49,8 @@ RESPONSE_LETAL = get_env_var('RESPONSE_LETAL')                # Обязател
 RESPONSES_SCAMIL = json.loads(get_env_var('RESPONSES_SCAMIL'))  # Обязательная переменная
 TEAM_IDS = json.loads(get_env_var('TEAM_IDS'))                # Обязательная переменная
 TARGET_REACTION = get_env_var('TARGET_REACTION')              # Обязательная переменная
+REACTION_ENABLED = get_env_var('REACTION_ENABLED', 'true').lower() == 'true'  # Включены ли реакции
+REACTION_TARGET_USER_ID = int(get_env_var('REACTION_TARGET_USER_ID', str(TARGET_USER_ID)))  # Пользователь, на чьи сообщения ставится реакция
 
 # Настройки мониторинга и бэкапа
 BACKUP_ENABLED = get_env_var('BACKUP_ENABLED', 'true').lower() == 'true'

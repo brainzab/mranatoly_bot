@@ -2,6 +2,7 @@ import logging
 from openai import AsyncOpenAI
 from app.config import DEEPSEEK_API_KEY, AI_SYSTEM_PROMPT, MAX_TOKENS, AI_TEMPERATURE
 from app.services.api import retry_async
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,10 @@ class AiHandler:
                 retry_delay=1
             )
             
-            return response
+            # Обрабатываем маркдаун-разметку для Telegram
+            processed_response = AiHandler._process_markdown(response)
+            
+            return processed_response
         except Exception as e:
             logger.error(f"Ошибка при получении ответа от AI: {e}")
             return f"Ошибка, ёбана: {str(e)}"
@@ -43,3 +47,15 @@ class AiHandler:
             temperature=AI_TEMPERATURE
         )
         return response.choices[0].message.content
+        
+    @staticmethod
+    def _process_markdown(text):
+        """Исправляет Markdown-разметку для корректного отображения в Telegram"""
+        # Заменяем звездочки на специальные символы для форматирования
+        # Сначала экранируем все '*' которые не используются для форматирования
+        text = re.sub(r'(?<!\*)\*(?!\*)', '\\*', text)
+        
+        # Заменяем ** на соответствующие Telegram разметки для жирного текста
+        text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+        
+        return text

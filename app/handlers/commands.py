@@ -4,11 +4,12 @@ from aiogram.filters import Command
 from functools import partial
 from app.services.api import ApiClient
 from app.database.models import ChatHistory
-from app.config import CODE_VERSION, TARGET_CHAT_ID, TEAM_IDS, MONITORING_ENABLED
+from app.config import CODE_VERSION, TARGET_CHAT_ID, TEAM_IDS, MONITORING_ENABLED, REACTION_ENABLED, REACTION_TARGET_USER_ID, TARGET_REACTION
 from app.services.monitoring import monitoring, monitor_function
 import asyncpg
 import asyncio
 from datetime import datetime
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -527,3 +528,105 @@ class CommandHandlers:
         except Exception as e:
             logger.error(f"Ошибка при получении статистики чата: {e}")
             await message.reply(f"Произошла ошибка при получении статистики: {e}")
+
+    @monitor_function
+    async def command_reaction(self, message: types.Message, **kwargs):
+        """Обработчик команды /reaction для настройки реакций на сообщения"""
+        monitoring.increment_command(message.chat.id)
+        
+        # Проверка прав администратора
+        is_admin = False
+        try:
+            chat_member = await self.bot.get_chat_member(message.chat.id, message.from_user.id)
+            is_admin = chat_member.status in ["administrator", "creator"]
+        except Exception as e:
+            logger.error(f"Ошибка при проверке прав администратора: {e}")
+        
+        # Если это не администратор, не разрешаем использовать команду
+        if not is_admin:
+            sent_message = await message.reply("Только админы могут управлять реакциями, петушок!")
+            return
+            
+        # Разбираем аргументы команды
+        args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+        
+        # Если аргументов нет, выводим текущие настройки и инструкцию
+        if not args:
+            status = "включены" if REACTION_ENABLED else "выключены"
+            target_user = REACTION_TARGET_USER_ID if REACTION_ENABLED else "не задан"
+            reaction = TARGET_REACTION if REACTION_ENABLED and TARGET_REACTION else "не задана"
+            
+            response = (
+                f"🔹 Текущие настройки реакций:\n"
+                f"▫️ Статус: {status}\n"
+                f"▫️ ID пользователя: {target_user}\n"
+                f"▫️ Реакция: {reaction}\n\n"
+                f"🔸 Использование команды:\n"
+                f"▫️ /reaction on|off - включить/выключить реакции\n"
+                f"▫️ /reaction set_user ID - установить ID пользователя для реакций\n"
+                f"▫️ /reaction set_emoji EMOJI - установить эмодзи для реакции\n"
+                f"▫️ /reaction clear - отключить реакции"
+            )
+            
+            sent_message = await message.reply(response)
+            return
+            
+        # Обрабатываем команды
+        action = args[0].lower()
+        
+        if action == "on":
+            # Сохраняем в переменную окружения
+            os.environ['REACTION_ENABLED'] = 'true'
+            # Обновляем переменную в памяти
+            import app.config
+            app.config.REACTION_ENABLED = True
+            sent_message = await message.reply("✅ Реакции включены")
+            
+        elif action == "off":
+            # Сохраняем в переменную окружения
+            os.environ['REACTION_ENABLED'] = 'false'
+            # Обновляем переменную в памяти
+            import app.config
+            app.config.REACTION_ENABLED = False
+            sent_message = await message.reply("✅ Реакции выключены")
+            
+        elif action == "set_user" and len(args) > 1:
+            try:
+                # Проверка валидности ID
+                user_id = int(args[1])
+                # Сохраняем в переменную окружения
+                os.environ['REACTION_TARGET_USER_ID'] = str(user_id)
+                # Обновляем переменную в памяти
+                import app.config
+                app.config.REACTION_TARGET_USER_ID = user_id
+                sent_message = await message.reply(f"✅ ID пользователя для реакций установлен: {user_id}")
+            except ValueError:
+                sent_message = await message.reply("❌ Ошибка: ID пользователя должен быть числом")
+                
+        elif action == "set_emoji" and len(args) > 1:
+            emoji = args[1]
+            # Проверка, что это действительно эмодзи или поддерживаемая реакция
+            # Это простая проверка, можно реализовать более сложную валидацию
+            if len(emoji) <= 2:
+                sent_message = await message.reply("❌ Ошибка: это не похоже на эмодзи")
+                return
+                
+            # Сохраняем в переменную окружения
+            os.environ['TARGET_REACTION'] = emoji
+            # Обновляем переменную в памяти
+            import app.config
+            app.config.TARGET_REACTION = emoji
+            sent_message = await message.reply(f"✅ Эмодзи для реакций установлено: {emoji}")
+            
+        elif action == "clear":
+            # Отключаем реакции и сбрасываем настройки
+            os.environ['REACTION_ENABLED'] = 'false'
+            os.environ['TARGET_REACTION'] = ''
+            # Обновляем переменные в памяти
+            import app.config
+            app.config.REACTION_ENABLED = False
+            app.config.TARGET_REACTION = ''
+            sent_message = await message.reply("✅ Реакции отключены и настройки сброшены")
+            
+        else:
+            sent_message = await message.reply("❌ Неизвестная команда. Используйте /reaction без параметров для справки.")
