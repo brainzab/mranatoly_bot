@@ -3,6 +3,9 @@ import re
 import os
 import tempfile
 import time
+import json
+import requests
+import urllib.parse
 from instaloader import Instaloader, Post, LoginRequiredException, ConnectionException, TwoFactorAuthRequiredException
 import pyotp
 from app.services.api import retry_async
@@ -21,6 +24,7 @@ class InstagramHandler:
         self.loader = Instaloader()
         self.temp_dir = tempfile.gettempdir()
         self.session_file = INSTAGRAM_SESSION_FILE
+        self.is_logged_in = False
         self._login()
     
     def _generate_2fa_code(self):
@@ -30,8 +34,23 @@ class InstagramHandler:
             return None
         
         try:
+            secret = INSTAGRAM_2FA_SECRET
+            
+            # Если передан URL TOTP (otpauth://...), извлекаем секрет из него
+            if secret.startswith("otpauth://"):
+                try:
+                    import urllib.parse
+                    url_parts = urllib.parse.urlparse(secret)
+                    query_params = dict(urllib.parse.parse_qsl(url_parts.query))
+                    if "secret" in query_params:
+                        secret = query_params["secret"]
+                        logger.info("Извлечен секрет из TOTP URL")
+                except Exception as e:
+                    logger.error(f"Ошибка при извлечении секрета из URL: {e}")
+            
             # Очищаем секрет от лишних символов и приводим к base32
-            secret = INSTAGRAM_2FA_SECRET.replace(' ', '').replace('-', '').upper()
+            secret = secret.replace(' ', '').replace('-', '').upper()
+            
             # Удаляем все символы, не входящие в алфавит Base32
             base32_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
             secret = ''.join(c for c in secret if c in base32_alphabet)
@@ -46,7 +65,11 @@ class InstagramHandler:
                 secret += '=' * (8 - len(secret) % 8)
                 
             logger.info(f"Длина очищенного секретного ключа 2FA: {len(secret)} символов")
-            totp = pyotp.TOTP(secret)
+            
+            # Создаем TOTP с использованием стандартных параметров Instagram
+            totp = pyotp.TOTP(secret, digits=6, digest='sha1', interval=30)
+            
+            # Получаем текущий код
             return totp.now()
         except Exception as e:
             logger.error(f"Ошибка при генерации 2FA кода: {e}")
@@ -63,6 +86,7 @@ class InstagramHandler:
             try:
                 self.loader.load_session_from_file(INSTAGRAM_USERNAME, self.session_file)
                 logger.info("Сессия Instagram успешно загружена")
+                self.is_logged_in = True
                 return
             except FileNotFoundError:
                 logger.info("Сессия не найдена, выполняем новую авторизацию")
@@ -80,6 +104,7 @@ class InstagramHandler:
                 # Сохраняем сессию
                 self.loader.save_session_to_file(self.session_file)
                 logger.info("Новая сессия Instagram успешно создана и сохранена")
+                self.is_logged_in = True
             except TwoFactorAuthRequiredException:
                 if INSTAGRAM_2FA_ENABLED:
                     logger.error("Не удалось авторизоваться с 2FA. Проверьте секретный ключ.")
@@ -116,17 +141,49 @@ class InstagramHandler:
             code = self._generate_2fa_code()
             if not code:
                 raise ValueError("Не удалось сгенерировать код 2FA")
+                
+            logger.info(f"Сгенерирован код 2FA: {code}")
             
-            # Вводим код 2FA
-            self.loader.two_factor_login(code)
-            logger.info("Успешная 2FA авторизация в Instagram")
+            # В некоторых случаях может потребоваться подождать несколько секунд,
+            # чтобы код стал действительным на серверах Instagram
+            time.sleep(3)
+            
+            # Пробуем несколько кодов с разным временем
+            try:
+                # Пробуем текущий код
+                self.loader.two_factor_login(code)
+                logger.info("Успешная 2FA авторизация в Instagram")
+                return
+            except Exception as e:
+                logger.warning(f"Ошибка при первой попытке 2FA: {e}")
+                
+            # Если первая попытка не удалась, ждем 30 секунд и пробуем снова
+            # (коды TOTP обновляются каждые 30 секунд)
+            logger.info("Ожидаем нового кода 2FA...")
+            time.sleep(30)
+            
+            # Генерируем новый код
+            new_code = self._generate_2fa_code()
+            if new_code != code:
+                logger.info(f"Сгенерирован новый код 2FA: {new_code}")
+                try:
+                    self.loader.two_factor_login(new_code)
+                    logger.info("Успешная 2FA авторизация с новым кодом")
+                    return
+                except Exception as e:
+                    logger.error(f"Ошибка при второй попытке 2FA: {e}")
+                    raise ValueError("Не удалось авторизоваться с 2FA кодом")
+            else:
+                logger.error("Новый код 2FA совпадает с предыдущим, возможно неверная настройка TOTP")
+                raise ValueError("Проблема с генерацией 2FA кодов")
     
     async def download_reel(self, url: str) -> str:
         """Скачивает видео из Instagram Reel"""
         try:
             # Проверяем авторизацию
-            if not self.loader.context.is_logged_in:
-                logger.warning("Не авторизован в Instagram, пробуем скачать без авторизации")
+            if not self.is_logged_in:
+                logger.warning("Не авторизован в Instagram, пробуем альтернативный метод")
+                return await self._download_reel_alternative(url)
             
             # Извлекаем shortcode из URL
             shortcode = self._extract_shortcode(url)
@@ -137,24 +194,182 @@ class InstagramHandler:
             temp_path = os.path.join(self.temp_dir, f"reel_{shortcode}")
             os.makedirs(temp_path, exist_ok=True)
             
-            # Скачиваем пост
-            post = await retry_async(
-                self._download_post,
-                shortcode=shortcode,
-                target=temp_path,
-                max_retries=3,
-                retry_delay=1
-            )
+            try:
+                # Пробуем скачать через instaloader
+                post = await retry_async(
+                    self._download_post,
+                    shortcode=shortcode,
+                    target=temp_path,
+                    max_retries=3,
+                    retry_delay=1
+                )
+                
+                # Находим видео файл
+                video_path = self._find_video_file(temp_path)
+                if not video_path:
+                    raise ValueError("Видео не найдено в скачанном посте")
+                
+                return video_path
+            except Exception as e:
+                logger.error(f"Ошибка при скачивании через Instaloader: {e}")
+                # Если не удалось скачать через instaloader, пробуем альтернативный метод
+                return await self._download_reel_alternative(url)
             
-            # Находим видео файл
-            video_path = self._find_video_file(temp_path)
-            if not video_path:
-                raise ValueError("Видео не найдено в скачанном посте")
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании Reel: {e}")
+            raise
+    
+    async def _download_reel_alternative(self, url: str) -> str:
+        """Альтернативный метод скачивания через публичный API без авторизации"""
+        try:
+            # Извлекаем shortcode из URL
+            shortcode = self._extract_shortcode(url)
+            if not shortcode:
+                raise ValueError("Неверный формат URL Instagram Reel")
+            
+            logger.info(f"Пробуем скачать рил с shortcode {shortcode} альтернативным методом")
+            
+            # Создаем временную директорию для сохранения
+            temp_path = os.path.join(self.temp_dir, f"reel_{shortcode}_alt")
+            os.makedirs(temp_path, exist_ok=True)
+            
+            # Формируем URL для получения информации о посте без авторизации
+            json_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
+            
+            # Задаем заголовки для имитации браузера
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
+            }
+            
+            # Получаем информацию о посте
+            session = requests.Session()
+            response = session.get(json_url, headers=headers)
+            
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка при получении информации о посте: {response.status_code}")
+            
+            # Парсим JSON
+            try:
+                data = response.json()
+            except Exception as e:
+                logger.error(f"Ошибка при парсинге JSON: {e}")
+                # Если не удалось распарсить JSON, пробуем получить через web-запрос
+                return await self._download_reel_web(url, temp_path)
+            
+            # Ищем URL видео
+            video_url = None
+            try:
+                if 'items' in data and len(data['items']) > 0:
+                    item = data['items'][0]
+                    if 'video_versions' in item:
+                        video_url = item['video_versions'][0]['url']
+                    elif 'carousel_media' in item:
+                        for media in item['carousel_media']:
+                            if 'video_versions' in media:
+                                video_url = media['video_versions'][0]['url']
+                                break
+                
+                # Проверяем другие пути в JSON
+                if not video_url and 'graphql' in data:
+                    if 'shortcode_media' in data['graphql']:
+                        media = data['graphql']['shortcode_media']
+                        if media.get('is_video') and 'video_url' in media:
+                            video_url = media['video_url']
+            except Exception as e:
+                logger.error(f"Ошибка при извлечении URL видео: {e}")
+            
+            if not video_url:
+                logger.warning("Не удалось найти URL видео в JSON")
+                # Если не удалось найти URL видео, пробуем получить через web-запрос
+                return await self._download_reel_web(url, temp_path)
+                
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}.mp4")
+            self._download_file(video_url, video_path)
             
             return video_path
             
         except Exception as e:
-            logger.error(f"Ошибка при скачивании Reel: {e}")
+            logger.error(f"Ошибка при альтернативном скачивании: {e}")
+            raise
+    
+    async def _download_reel_web(self, url: str, temp_path: str) -> str:
+        """Скачивает рил через web-запрос, извлекая URL видео из HTML"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            
+            # Формируем URL для запроса
+            page_url = f"https://www.instagram.com/reel/{shortcode}/"
+            
+            # Задаем заголовки для имитации браузера
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
+            }
+            
+            # Получаем HTML страницы
+            session = requests.Session()
+            response = session.get(page_url, headers=headers)
+            
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка при получении страницы: {response.status_code}")
+            
+            # Ищем URL видео в HTML
+            html = response.text
+            video_url = None
+            
+            # Регулярное выражение для поиска URL видео
+            video_patterns = [
+                r'\"video_url\":\"(https:\\\/\\\/.*?\.mp4.*?)\"',
+                r'"video_url":"(https:\/\/.*?\.mp4.*?)"',
+                r'"contentUrl":"(https:\/\/.*?\.mp4.*?)"'
+            ]
+            
+            for pattern in video_patterns:
+                match = re.search(pattern, html)
+                if match:
+                    video_url = match.group(1).replace('\\/', '/')
+                    break
+            
+            if not video_url:
+                raise ValueError("Не удалось найти URL видео на странице")
+                
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_web.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через web: {e}")
+            raise
+    
+    def _download_file(self, url: str, path: str):
+        """Скачивает файл по URL"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            }
+            
+            with requests.get(url, headers=headers, stream=True) as r:
+                r.raise_for_status()
+                with open(path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            
+            logger.info(f"Файл успешно скачан: {path}")
+            return path
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании файла: {e}")
             raise
     
     def _extract_shortcode(self, url: str) -> str:
