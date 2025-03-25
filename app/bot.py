@@ -162,6 +162,7 @@ class BotApp:
         self.dp.message.register(self.command_handlers.command_byn, Command("byn"))
         self.dp.message.register(self.command_handlers.command_chatstats, Command("chatstats"))
         self.dp.message.register(self.command_handlers.command_reaction, Command("reaction"))
+        self.dp.message.register(self.command_handlers.command_users_stat, Command("users_stat"))
         
         # Команды для футбольных матчей
         self.dp.message.register(

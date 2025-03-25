@@ -636,3 +636,136 @@ class CommandHandlers:
             
         else:
             sent_message = await message.reply("❌ Неизвестная команда. Используйте /reaction без параметров для справки.")
+
+    @monitor_function
+    async def command_users_stat(self, message: types.Message, **kwargs):
+        """Обработчик команды /users_stat для получения статистики пользователей"""
+        monitoring.increment_command(message.chat.id)
+        
+        # Отправляем временное сообщение о сборе статистики
+        temp_message = await message.reply("Собираю статистику пользователей, подождите...")
+        
+        try:
+            # Получаем статистику за последние 24 часа
+            day_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, message.chat.id, period="day")
+            
+            # Получаем статистику за последнюю неделю (7 дней)
+            week_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, message.chat.id, period="month")
+            week_stats_filtered = {"total_messages": 0, "users": []}
+            for user in week_stats["users"]:
+                user_id = user["user_id"]
+                # Получаем статистику за последние 7 дней для каждого пользователя
+                async with self.db_pool.acquire() as conn:
+                    count = await conn.fetchval(
+                        """
+                        SELECT COUNT(*) 
+                        FROM chat_history 
+                        WHERE chat_id = $1 AND user_id = $2 AND role = 'user' 
+                        AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days')
+                        """,
+                        message.chat.id, user_id
+                    )
+                    if count > 0:
+                        week_stats_filtered["users"].append({"user_id": user_id, "message_count": count})
+                        week_stats_filtered["total_messages"] += count
+            
+            # Получаем статистику за последний месяц (30 дней)
+            month_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, message.chat.id, period="month")
+            
+            # Получаем статистику за все время
+            all_time_stats = await ChatHistory.get_chat_messages_stats(self.db_pool, message.chat.id)
+            
+            # Получаем имена пользователей
+            all_users = set()
+            for stat in [day_stats, week_stats_filtered, month_stats, all_time_stats]:
+                for user in stat["users"]:
+                    all_users.add(user["user_id"])
+                    
+            try:
+                # Получаем информацию о пользователях
+                usernames = {}
+                for user_id in all_users:
+                    try:
+                        # Сначала пытаемся получить пользователя из чата
+                        chat_member = await self.bot.get_chat_member(chat_id=message.chat.id, user_id=user_id)
+                        user = chat_member.user
+                        
+                        # Формируем имя пользователя
+                        if user.username:
+                            name = f"@{user.username}"
+                        else:
+                            name = user.full_name or f"User {user_id}"
+                            
+                        usernames[user_id] = name
+                    except Exception as e:
+                        logger.warning(f"Не удалось получить имя пользователя {user_id}: {e}")
+                        usernames[user_id] = f"User {user_id}"
+            except Exception as e:
+                logger.error(f"Ошибка при получении имен пользователей: {e}")
+                # Если не удалось получить имена, используем ID
+                usernames = {user_id: f"User {user_id}" for user_id in all_users}
+            
+            # Формируем ответ
+            response = "📊 **Статистика пользователей**\n\n"
+            
+            # За 24 часа
+            response += "**За последние 24 часа:**\n"
+            if day_stats["total_messages"] > 0:
+                response += f"Всего сообщений: {day_stats['total_messages']}\n"
+                for user in sorted(day_stats["users"], key=lambda x: x["message_count"], reverse=True)[:10]:
+                    user_id = user["user_id"]
+                    name = usernames.get(user_id, f"User {user_id}")
+                    response += f"- {name}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет сообщений\n"
+            
+            response += "\n**За последнюю неделю:**\n"
+            if week_stats_filtered["total_messages"] > 0:
+                response += f"Всего сообщений: {week_stats_filtered['total_messages']}\n"
+                for user in sorted(week_stats_filtered["users"], key=lambda x: x["message_count"], reverse=True)[:10]:
+                    user_id = user["user_id"]
+                    name = usernames.get(user_id, f"User {user_id}")
+                    response += f"- {name}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет сообщений\n"
+                
+            response += "\n**За последний месяц:**\n"
+            if month_stats["total_messages"] > 0:
+                response += f"Всего сообщений: {month_stats['total_messages']}\n"
+                for user in sorted(month_stats["users"], key=lambda x: x["message_count"], reverse=True)[:10]:
+                    user_id = user["user_id"]
+                    name = usernames.get(user_id, f"User {user_id}")
+                    response += f"- {name}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет сообщений\n"
+                
+            response += "\n**За все время:**\n"
+            if all_time_stats["total_messages"] > 0:
+                response += f"Всего сообщений: {all_time_stats['total_messages']}\n"
+                for user in sorted(all_time_stats["users"], key=lambda x: x["message_count"], reverse=True)[:10]:
+                    user_id = user["user_id"]
+                    name = usernames.get(user_id, f"User {user_id}")
+                    response += f"- {name}: {user['message_count']} сообщений\n"
+            else:
+                response += "Нет сообщений\n"
+            
+            # Удаляем временное сообщение
+            await self.bot.delete_message(chat_id=message.chat.id, message_id=temp_message.message_id)
+            
+            # Отправляем результат
+            sent_message = await message.reply(response)
+            
+            # Сохраняем сообщение в историю чата если нужно
+            if message.chat.id == TARGET_CHAT_ID:
+                await ChatHistory.save_message(
+                    self.db_pool, 
+                    message.chat.id, 
+                    self.bot.id, 
+                    sent_message.message_id, 
+                    "assistant", 
+                    response
+                )
+                
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении команды users_stat: {e}")
+            await message.reply(f"Произошла ошибка при сборе статистики: {e}")
