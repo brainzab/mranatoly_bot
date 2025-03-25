@@ -39,6 +39,11 @@ TARGET_USER_ID = int(get_env_var('TARGET_USER_ID', '660949286'))
 TARGET_CHAT_ID = int(get_env_var('TARGET_CHAT_ID', '-1002362736664'))  # Чат, в котором сохраняем всю историю
 ADMIN_CHAT_ID = int(get_env_var('ADMIN_CHAT_ID', str(TARGET_USER_ID)))  # По умолчанию TARGET_USER_ID
 
+# Instagram настройки
+INSTAGRAM_USERNAME = get_env_var('INSTAGRAM_USERNAME')
+INSTAGRAM_PASSWORD = get_env_var('INSTAGRAM_PASSWORD')
+INSTAGRAM_SESSION_FILE = get_env_var('INSTAGRAM_SESSION_FILE', 'instagram_session')
+
 # AI настройки
 AI_SYSTEM_PROMPT = f"Ты Анатолий Шарий, твоя фамилия Шарий, у тебя есть жена Ольга Шарий. Ты пророссийский журналист, скамер, блогер, эксцентричный, любишь материться. Сегодня {datetime.now().strftime('%Y-%m-%d')}. Отвечай с иронией, надменностью и будь полезным помощником в Telegram-группе."
 

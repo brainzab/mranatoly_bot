@@ -4,6 +4,7 @@ import os
 import tempfile
 from instaloader import Instaloader, Post
 from app.services.api import retry_async
+from app.config import INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD, INSTAGRAM_SESSION_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,34 @@ class InstagramHandler:
     def __init__(self):
         self.loader = Instaloader()
         self.temp_dir = tempfile.gettempdir()
+        self.session_file = INSTAGRAM_SESSION_FILE
+        self._login()
+    
+    def _login(self):
+        """Авторизация в Instagram с поддержкой сессии"""
+        try:
+            if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD:
+                logger.warning("Учетные данные Instagram не указаны")
+                return
+
+            # Пробуем загрузить существующую сессию
+            try:
+                self.loader.load_session_from_file(INSTAGRAM_USERNAME, self.session_file)
+                logger.info("Сессия Instagram успешно загружена")
+                return
+            except FileNotFoundError:
+                logger.info("Сессия не найдена, выполняем новую авторизацию")
+            
+            # Если сессия не найдена, выполняем новую авторизацию
+            self.loader.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            
+            # Сохраняем сессию
+            self.loader.save_session_to_file(self.session_file)
+            logger.info("Новая сессия Instagram успешно создана и сохранена")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при авторизации в Instagram: {e}")
+            raise
     
     async def download_reel(self, url: str) -> str:
         """Скачивает видео из Instagram Reel"""
