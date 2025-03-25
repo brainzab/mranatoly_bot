@@ -233,37 +233,32 @@ class InstagramHandler:
             temp_path = os.path.join(self.temp_dir, f"reel_{shortcode}_alt")
             os.makedirs(temp_path, exist_ok=True)
             
-            # Формируем URL для получения информации о посте без авторизации
-            json_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
-            
-            # Задаем заголовки для имитации браузера
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Cache-Control': 'max-age=0',
-            }
-            
-            # Получаем информацию о посте
-            session = requests.Session()
-            response = session.get(json_url, headers=headers)
-            
-            if response.status_code != 200:
-                raise ValueError(f"Ошибка при получении информации о посте: {response.status_code}")
-            
-            # Парсим JSON
             try:
+                # Формируем URL для получения информации о посте без авторизации
+                json_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
+                
+                # Задаем заголовки для имитации браузера
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Cache-Control': 'max-age=0',
+                }
+                
+                # Получаем информацию о посте
+                session = requests.Session()
+                response = session.get(json_url, headers=headers)
+                
+                if response.status_code != 200:
+                    raise ValueError(f"Ошибка при получении информации о посте: {response.status_code}")
+                
+                # Парсим JSON
                 data = response.json()
-            except Exception as e:
-                logger.error(f"Ошибка при парсинге JSON: {e}")
-                # Если не удалось распарсить JSON, пробуем получить через web-запрос
-                return await self._download_reel_web(url, temp_path)
-            
-            # Ищем URL видео
-            video_url = None
-            try:
+                
+                # Ищем URL видео
+                video_url = None
                 if 'items' in data and len(data['items']) > 0:
                     item = data['items'][0]
                     if 'video_versions' in item:
@@ -280,77 +275,194 @@ class InstagramHandler:
                         media = data['graphql']['shortcode_media']
                         if media.get('is_video') and 'video_url' in media:
                             video_url = media['video_url']
-            except Exception as e:
-                logger.error(f"Ошибка при извлечении URL видео: {e}")
-            
-            if not video_url:
-                logger.warning("Не удалось найти URL видео в JSON")
-                # Если не удалось найти URL видео, пробуем получить через web-запрос
-                return await self._download_reel_web(url, temp_path)
                 
-            # Скачиваем видео
-            video_path = os.path.join(temp_path, f"{shortcode}.mp4")
-            self._download_file(video_url, video_path)
-            
-            return video_path
+                if not video_url:
+                    raise ValueError("Не удалось найти URL видео в JSON")
+                    
+                # Скачиваем видео
+                video_path = os.path.join(temp_path, f"{shortcode}.mp4")
+                self._download_file(video_url, video_path)
+                
+                return video_path
+            except Exception as e:
+                logger.error(f"Ошибка метода 1: {e}")
+                # Если не удалось скачать через API, пробуем другие методы
+                try:
+                    # Пробуем скачать через веб-парсинг
+                    return await self._download_reel_web(url, temp_path)
+                except Exception as e2:
+                    logger.error(f"Ошибка метода 2: {e2}")
+                    # Если и через веб-парсинг не удалось, пробуем через сторонние сервисы
+                    return await self._download_reel_via_service(url, temp_path)
             
         except Exception as e:
             logger.error(f"Ошибка при альтернативном скачивании: {e}")
-            raise
+            # Финальная попытка - через сторонний сервис
+            return await self._download_reel_via_service(url, temp_path if 'temp_path' in locals() else None)
     
-    async def _download_reel_web(self, url: str, temp_path: str) -> str:
-        """Скачивает рил через web-запрос, извлекая URL видео из HTML"""
+    async def _download_reel_via_service(self, url: str, temp_path: str = None) -> str:
+        """Скачивает рил через сторонние сервисы"""
         try:
+            logger.info("Пробуем скачать рил через сторонний сервис")
+            
             shortcode = self._extract_shortcode(url)
+            if not temp_path:
+                temp_path = os.path.join(self.temp_dir, f"reel_{shortcode}_service")
+                os.makedirs(temp_path, exist_ok=True)
             
-            # Формируем URL для запроса
-            page_url = f"https://www.instagram.com/reel/{shortcode}/"
-            
-            # Задаем заголовки для имитации браузера
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Cache-Control': 'max-age=0',
-            }
-            
-            # Получаем HTML страницы
-            session = requests.Session()
-            response = session.get(page_url, headers=headers)
-            
-            if response.status_code != 200:
-                raise ValueError(f"Ошибка при получении страницы: {response.status_code}")
-            
-            # Ищем URL видео в HTML
-            html = response.text
-            video_url = None
-            
-            # Регулярное выражение для поиска URL видео
-            video_patterns = [
-                r'\"video_url\":\"(https:\\\/\\\/.*?\.mp4.*?)\"',
-                r'"video_url":"(https:\/\/.*?\.mp4.*?)"',
-                r'"contentUrl":"(https:\/\/.*?\.mp4.*?)"'
+            # Список сервисов для скачивания
+            services = [
+                self._download_via_rapidapi,
+                self._download_via_snapinsta,
+                self._download_via_saveinsta
             ]
             
-            for pattern in video_patterns:
-                match = re.search(pattern, html)
-                if match:
-                    video_url = match.group(1).replace('\\/', '/')
+            # Пробуем каждый сервис по очереди
+            last_error = None
+            for service_func in services:
+                try:
+                    return await service_func(url, shortcode, temp_path)
+                except Exception as e:
+                    logger.warning(f"Сервис {service_func.__name__} не сработал: {e}")
+                    last_error = e
+            
+            raise last_error or ValueError("Не удалось скачать видео через сторонние сервисы")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через сторонние сервисы: {e}")
+            raise
+    
+    async def _download_via_rapidapi(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через RapidAPI Instagram Downloader"""
+        try:
+            # Настройки запроса
+            api_url = "https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index"
+            headers = {
+                'X-RapidAPI-Host': 'instagram-downloader-download-instagram-videos-stories.p.rapidapi.com',
+                'X-RapidAPI-Key': '87fc744925msh6a94fe5a6a95178p1af631jsna48e1f87db4c'  # Демо-ключ
+            }
+            params = {"url": url}
+            
+            # Отправляем запрос
+            response = requests.get(api_url, headers=headers, params=params)
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка API: {response.status_code}")
+            
+            data = response.json()
+            if not data.get('media'):
+                raise ValueError("Ответ API не содержит медиа-данных")
+            
+            video_url = None
+            for media in data['media']:
+                if media.get('type') == 'video':
+                    video_url = media.get('url')
                     break
             
             if not video_url:
-                raise ValueError("Не удалось найти URL видео на странице")
-                
+                raise ValueError("В ответе API нет URL видео")
+            
             # Скачиваем видео
-            video_path = os.path.join(temp_path, f"{shortcode}_web.mp4")
+            video_path = os.path.join(temp_path, f"{shortcode}_rapidapi.mp4")
             self._download_file(video_url, video_path)
             
             return video_path
-            
         except Exception as e:
-            logger.error(f"Ошибка при скачивании через web: {e}")
+            logger.error(f"Ошибка при скачивании через RapidAPI: {e}")
+            raise
+    
+    async def _download_via_snapinsta(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через snapinsta.app"""
+        try:
+            # Первый запрос для получения токена
+            session = requests.Session()
+            main_url = "https://snapinsta.app/"
+            main_response = session.get(main_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            })
+            
+            if main_response.status_code != 200:
+                raise ValueError(f"Ошибка при доступе к сервису: {main_response.status_code}")
+            
+            # Извлекаем токен из HTML
+            token_match = re.search(r'name="token" value="([^"]+)"', main_response.text)
+            if not token_match:
+                raise ValueError("Не удалось найти токен")
+            
+            token = token_match.group(1)
+            
+            # Отправляем запрос на скачивание
+            download_url = "https://snapinsta.app/action.php"
+            data = {
+                "url": url,
+                "token": token,
+                "lang": "en"
+            }
+            
+            download_response = session.post(download_url, data=data, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://snapinsta.app',
+                'Referer': 'https://snapinsta.app/',
+            })
+            
+            if download_response.status_code != 200:
+                raise ValueError(f"Ошибка при запросе на скачивание: {download_response.status_code}")
+            
+            # Ищем URL видео
+            html_content = download_response.text
+            video_match = re.search(r'<a\s+href="([^"]+)"\s+.*?download', html_content)
+            if not video_match:
+                raise ValueError("Не удалось найти ссылку на скачивание")
+            
+            video_url = video_match.group(1)
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_snapinsta.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через SnapInsta: {e}")
+            raise
+    
+    async def _download_via_saveinsta(self, url: str, shortcode: str, temp_path: str) -> str:
+        """Скачивает видео через saveinsta.app"""
+        try:
+            # Настройки запроса
+            api_url = "https://saveinsta.app/api/ajaxSearch"
+            data = {"q": url, "t": "media", "lang": "en"}
+            
+            # Отправляем запрос
+            response = requests.post(api_url, data=data, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://saveinsta.app',
+                'Referer': 'https://saveinsta.app/',
+            })
+            
+            if response.status_code != 200:
+                raise ValueError(f"Ошибка при запросе: {response.status_code}")
+            
+            # Парсим JSON
+            data = response.json()
+            if not data.get('data'):
+                raise ValueError("Ответ не содержит данных")
+            
+            # Ищем URL видео
+            html_content = data['data']
+            video_match = re.search(r'<a\s+href="([^"]+)"\s+.*?download', html_content)
+            if not video_match:
+                raise ValueError("Не удалось найти ссылку на скачивание")
+            
+            video_url = video_match.group(1)
+            
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_saveinsta.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через SaveInsta: {e}")
             raise
     
     def _download_file(self, url: str, path: str):
@@ -413,4 +525,85 @@ class InstagramHandler:
             if os.path.exists(temp_dir):
                 os.rmdir(temp_dir)
         except Exception as e:
-            logger.error(f"Ошибка при очистке временных файлов: {e}") 
+            logger.error(f"Ошибка при очистке временных файлов: {e}")
+    
+    async def _download_reel_web(self, url: str, temp_path: str) -> str:
+        """Скачивает рил через web-запрос, извлекая URL видео из HTML"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            logger.info(f"Пробуем скачать рил с shortcode {shortcode} через парсинг HTML")
+            
+            # Пробуем разные URL форматы
+            urls_to_try = [
+                f"https://www.instagram.com/reel/{shortcode}/",
+                f"https://www.instagram.com/p/{shortcode}/",
+                f"https://www.instagram.com/tv/{shortcode}/"
+            ]
+            
+            html = None
+            for page_url in urls_to_try:
+                try:
+                    # Задаем заголовки для имитации браузера
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Cookie': 'ig_cb=1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Cache-Control': 'max-age=0',
+                    }
+                    
+                    # Получаем HTML страницы
+                    session = requests.Session()
+                    response = session.get(page_url, headers=headers)
+                    
+                    if response.status_code == 200:
+                        html = response.text
+                        logger.info(f"Успешно получен HTML с URL: {page_url}")
+                        break
+                    else:
+                        logger.warning(f"Ошибка при получении {page_url}: {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Ошибка при доступе к {page_url}: {e}")
+            
+            if not html:
+                raise ValueError("Не удалось получить HTML страницы Instagram")
+            
+            # Ищем URL видео в HTML
+            video_url = None
+            
+            # Регулярное выражение для поиска URL видео
+            video_patterns = [
+                r'\"video_url\":\"(https:\\\/\\\/.*?\.mp4.*?)\"',
+                r'"video_url":"(https:\/\/.*?\.mp4.*?)"',
+                r'"contentUrl":"(https:\/\/.*?\.mp4.*?)"',
+                r'<meta property="og:video" content="([^"]+)"',
+                r'<meta property="og:video:secure_url" content="([^"]+)"',
+                r'videoUrl&quot;:&quot;(https:\/\/.*?\.mp4.*?)&quot;'
+            ]
+            
+            for pattern in video_patterns:
+                match = re.search(pattern, html)
+                if match:
+                    video_url = match.group(1).replace('\\/', '/').replace('&amp;', '&')
+                    logger.info(f"Найден URL видео по шаблону: {pattern[:20]}...")
+                    break
+            
+            if not video_url:
+                # Сохраняем HTML для отладки
+                debug_html_path = os.path.join(temp_path, "debug_page.html")
+                with open(debug_html_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                logger.error(f"Не удалось найти URL видео. HTML сохранен в: {debug_html_path}")
+                raise ValueError("Не удалось найти URL видео на странице")
+                
+            # Скачиваем видео
+            video_path = os.path.join(temp_path, f"{shortcode}_web.mp4")
+            self._download_file(video_url, video_path)
+            
+            return video_path
+            
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании через web: {e}")
+            raise 
