@@ -43,6 +43,8 @@ ADMIN_CHAT_ID = int(get_env_var('ADMIN_CHAT_ID', str(TARGET_USER_ID)))  # По �
 INSTAGRAM_USERNAME = get_env_var('INSTAGRAM_USERNAME')
 INSTAGRAM_PASSWORD = get_env_var('INSTAGRAM_PASSWORD')
 INSTAGRAM_SESSION_FILE = get_env_var('INSTAGRAM_SESSION_FILE', 'instagram_session')
+INSTAGRAM_2FA_ENABLED = get_env_var('INSTAGRAM_2FA_ENABLED', 'false').lower() == 'true'
+INSTAGRAM_2FA_SECRET = get_env_var('INSTAGRAM_2FA_SECRET', '')
 
 # AI настройки
 AI_SYSTEM_PROMPT = f"Ты Анатолий Шарий, твоя фамилия Шарий, у тебя есть жена Ольга Шарий. Ты пророссийский журналист, скамер, блогер, эксцентричный, любишь материться. Сегодня {datetime.now().strftime('%Y-%m-%d')}. Отвечай с иронией, надменностью и будь полезным помощником в Telegram-группе."
